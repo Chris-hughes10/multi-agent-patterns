@@ -528,26 +528,100 @@ Then migrate to Azure for production.
 
 ---
 
-## 9. Quick Start Commands
+## 9. Development Environment
+
+### Tools & Stack
+
+| Tool | Purpose |
+|------|---------|
+| **uv** | Fast Python package manager (replaces pip/venv) |
+| **DevContainer** | Consistent development environment |
+| **Ruff** | Linting and formatting |
+| **pytest** | Testing framework |
+| **mypy** | Static type checking |
+
+### Project Structure (Agent-Focused)
+
+```
+youtube-agent/
+├── .devcontainer/
+│   ├── devcontainer.json
+│   └── Dockerfile
+├── src/
+│   └── youtube_agent/
+│       ├── agents/          # Agent definitions (Search, Transcript, Orchestrator)
+│       ├── tools/           # Tools agents can use (search, fetch, summarize)
+│       └── models/          # Data models, config, Pydantic schemas
+├── tests/
+├── pyproject.toml
+├── .env.example
+└── Claude.md                # Coding style guide
+```
+
+**Why not DDD?** Agents are about behaviour and orchestration, not rich domain entities.
+
+### Quick Start (with DevContainer)
+
+1. **Clone and open in VS Code**
+   ```bash
+   git clone <repo-url>
+   code youtube-agent
+   ```
+
+2. **Reopen in Container** (VS Code will prompt, or use Command Palette)
+
+3. **Dependencies install automatically** via `uv sync`
+
+4. **Set up environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+### Quick Start (without DevContainer)
 
 ```bash
-# Create project
-mkdir youtube-agent && cd youtube-agent
-python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install core dependencies
-pip install agent-framework --pre
-pip install youtube-transcript-api
-pip install youtube-search-python
-pip install openai
-pip install python-dotenv
+# Clone and setup
+git clone <repo-url>
+cd youtube-agent
 
-# Optional: Add vector search later if needed
-pip install chromadb
+# Create venv and install dependencies
+uv sync
 
-# Create .env file
-echo "OPENAI_API_KEY=your-key-here" > .env
+# Activate environment
+source .venv/bin/activate
+
+# Set up environment
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+### Common Commands
+
+```bash
+# Run tests
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov
+
+# Type checking
+uv run mypy src
+
+# Linting
+uv run ruff check src tests
+
+# Format code
+uv run ruff format src tests
+
+# Add a dependency
+uv add <package-name>
+
+# Add a dev dependency
+uv add --dev <package-name>
 ```
 
 ---
