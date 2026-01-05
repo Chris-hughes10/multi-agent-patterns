@@ -1,5 +1,11 @@
 """Tools that agents can use - YouTube search, transcript fetch, etc."""
 
+from youtube_agent.tools.search import (
+    VideoSearchResult,
+    YouTubeSearchError,
+    search_youtube,
+    search_youtube_formatted,
+)
 from youtube_agent.tools.storage import (
     StoredTranscript,
     TranscriptStorage,
@@ -21,6 +27,11 @@ from youtube_agent.tools.transcript import (
 )
 
 __all__ = [
+    # YouTube search
+    "VideoSearchResult",
+    "YouTubeSearchError",
+    "search_youtube",
+    "search_youtube_formatted",
     # Transcript fetching
     "TranscriptFetchError",
     "TranscriptFetcher",

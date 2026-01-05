@@ -33,6 +33,9 @@ dev = [
     "mypy>=1.10.0",
 ]
 
+[project.scripts]
+youtube-agent = "youtube_agent.agents.main:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -102,3 +105,6 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
 ]
+
+[tool.uv.sources]
+youtube-search-python = { git = "https://github.com/alexmercerind/youtube-search-python" }
