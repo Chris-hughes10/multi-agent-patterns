@@ -78,41 +78,56 @@ This landscape comparison would be valuable content - many developers are confus
 
 ---
 
-## 3. Azure Services for Your Use Case
+## 3. Technology Stack (Start Simple!)
 
-### Azure AI Search - Agentic Retrieval (New!)
+### Local-First Approach (Recommended for Learning)
 
-Microsoft recently launched **Agentic Retrieval** in Azure AI Search (preview). Key benefits:
-- **40% improvement** in answer relevance vs traditional RAG
-- Autonomous query planning and execution
-- Multi-turn conversation support
-- Parallel execution across text and vector embeddings
+Start lightweight, scale to Azure later when needed.
 
-### Recommended Azure Stack
+| Component | Local Tool | Why |
+|-----------|------------|-----|
+| Vector Store | **ChromaDB** | `pip install chromadb` - zero config, runs embedded |
+| Embeddings | OpenAI API or Azure OpenAI | text-embedding-3-small |
+| LLM | OpenAI API or Azure OpenAI | GPT-4o-mini (cheap) or GPT-4o |
+| Orchestration | Microsoft Agent Framework | The framework you're learning |
+| Storage | Local filesystem | Keep it simple |
 
-| Component | Azure Service | Purpose |
-|-----------|---------------|---------|
-| Vector Store | Azure AI Search | Store and query transcript embeddings |
-| Embeddings | Azure OpenAI (text-embedding-3-small) | Convert text to 1536-dim vectors |
-| LLM | Azure OpenAI (GPT-4o) | Summarization and chat |
-| Orchestration | Microsoft Agent Framework | Agent logic and workflows |
-| Storage | Azure Blob Storage | Raw transcript storage |
+### Local Vector Database Options
 
-### Architecture Pattern
+| Database | Install | Best For | Limitation |
+|----------|---------|----------|------------|
+| **ChromaDB** | `pip install chromadb` | Prototyping, fastest setup, NumPy-like API | Not for 50M+ vectors |
+| **LanceDB** | `pip install lancedb` | Multi-modal data, low memory | Slightly lower recall |
+| **Qdrant** | Docker or `pip install qdrant-client` | Production-ready, filtered search | More setup |
+
+**Recommendation**: ChromaDB. Integrates with LangChain, LlamaIndex, and most AI toolchains. Recently got 4x faster with Rust rewrite.
+
+### Architecture Pattern (Local-First)
 
 ```
 YouTube Videos
       ↓
 [youtube-transcript-api] (Python library, no API key needed)
       ↓
-Chunking + Embedding (Azure OpenAI)
+Chunking + Embedding (OpenAI API)
       ↓
-Azure AI Search (Hybrid: Vector + Keyword)
+ChromaDB (Local vector store - zero config!)
       ↓
 Microsoft Agent Framework (Agent with Tools)
       ↓
 User Query → Search → Summarize → Response
 ```
+
+### Later: Scale to Azure
+
+When you're ready for production:
+
+| Component | Upgrade To | Why |
+|-----------|------------|-----|
+| Vector Store | Azure AI Search | Hybrid search, new Agentic Retrieval (40% better!) |
+| LLM/Embeddings | Azure OpenAI | Enterprise SLAs, private endpoints |
+| Storage | Azure Blob Storage | Scalability |
+| Hosting | Azure Container Apps | Production deployment |
 
 ---
 
@@ -179,51 +194,96 @@ for entry in transcript:
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │ Search Tool │  │ Summarize   │  │ Transcript Fetch Tool   │  │
 │  │             │  │ Tool        │  │ (youtube-transcript-api)│  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────────┘  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                                  │
                     ┌────────────┴────────────┐
                     ▼                         ▼
          ┌──────────────────┐      ┌──────────────────┐
-         │  Azure AI Search │      │   Azure OpenAI   │
-         │  (Vector + Text) │      │ (Embeddings+LLM) │
+         │    ChromaDB      │      │   OpenAI API     │
+         │  (Local Vectors) │      │ (Embeddings+LLM) │
          └──────────────────┘      └──────────────────┘
 ```
 
 ### Implementation Phases
 
-#### Phase 1: Foundation (Week 1-2)
-- [ ] Set up Azure resources (AI Search, OpenAI)
+#### Phase 1: Foundation (Simplest possible)
 - [ ] Create Python project structure
-- [ ] Implement transcript extraction
-- [ ] Basic chunking and embedding pipeline
-- [ ] Index a few test videos
+- [ ] Implement transcript extraction with youtube-transcript-api
+- [ ] Store transcripts as JSON files (key-value by video ID)
+- [ ] Basic summarization by passing whole transcript to LLM
 
-#### Phase 2: Search & Retrieval (Week 2-3)
-- [ ] Configure Azure AI Search index
-- [ ] Implement hybrid search (vector + keyword)
-- [ ] Build basic query interface
-- [ ] Test retrieval quality
-
-#### Phase 3: Agent Integration (Week 3-4)
+#### Phase 2: Agent Integration
 - [ ] Set up Microsoft Agent Framework
-- [ ] Create custom tools (search, summarize, fetch)
+- [ ] Create tools: fetch_transcript, summarize, lookup
 - [ ] Build agent with tool orchestration
-- [ ] Implement conversation memory
+- [ ] Store summaries alongside transcripts
 
-#### Phase 4: Polish & Blog (Week 4-5)
+#### Phase 3: Optional - Vector Search (if needed)
+- [ ] Add ChromaDB for semantic search across videos
+- [ ] Implement chunking for very long transcripts
+- [ ] Enable "search across all my videos" queries
+
+#### Phase 4: Polish & Blog
 - [ ] Add error handling and edge cases
 - [ ] Create simple UI (Streamlit recommended)
 - [ ] Write blog post documenting the journey
 - [ ] Create GitHub repo with examples
 
-### Minimal Viable Demo
+### Do You Even Need Vector Embeddings?
 
-For a quick proof-of-concept, you could:
-1. Use `youtube-transcript-api` to fetch transcripts
-2. Use LangChain/LangGraph OR Microsoft Agent Framework
-3. Use a local vector store (ChromaDB) instead of Azure (for local dev)
-4. Use Azure OpenAI for embeddings and chat
+**Great question to consider!** Modern LLMs have huge context windows:
+- GPT-4o: 128K tokens (~100K words)
+- GPT-4o-mini: 128K tokens (cheaper!)
+- Claude: 200K tokens
+- Gemini: 1M+ tokens
+
+A typical 1-hour YouTube video transcript is ~10,000-15,000 words. **Most transcripts fit entirely in one context window.**
+
+#### Simple Approach (Start Here!)
+
+```
+Video ID → JSON file with transcript → Pass whole thing to LLM → Done
+```
+
+| Storage | When to Use |
+|---------|-------------|
+| **JSON files** | < 50 videos, transcripts fit in context |
+| **SQLite** | Need to query metadata, still fits in context |
+| **ChromaDB** | 100+ videos, need semantic search across all |
+
+#### When You DO Need Vector Search
+
+- Searching across hundreds of videos: "Which video talked about X?"
+- Very long transcripts (4+ hour videos) that exceed context
+- Finding specific moments across a video library
+
+### Minimal Viable Demo (Simplest Path)
+
+```python
+# This is literally all you need to start:
+from youtube_transcript_api import YouTubeTranscriptApi
+import json
+from openai import OpenAI
+
+# 1. Fetch transcript
+transcript = YouTubeTranscriptApi().fetch("VIDEO_ID")
+full_text = " ".join([t['text'] for t in transcript])
+
+# 2. Store it
+with open(f"transcripts/{video_id}.json", "w") as f:
+    json.dump({"video_id": video_id, "text": full_text}, f)
+
+# 3. Summarize (whole transcript fits in context!)
+client = OpenAI()
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "Summarize this video transcript."},
+        {"role": "user", "content": full_text}
+    ]
+)
+```
 
 ---
 
@@ -313,16 +373,17 @@ mkdir youtube-agent && cd youtube-agent
 python -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-# Install dependencies
+# Install core dependencies (minimal)
 pip install agent-framework --pre
 pip install youtube-transcript-api
-pip install azure-search-documents
 pip install openai
 pip install python-dotenv
 
-# Azure CLI setup
-az login
-az account set --subscription "Your Subscription"
+# Optional: Add vector search later if needed
+pip install chromadb
+
+# Create .env file
+echo "OPENAI_API_KEY=your-key-here" > .env
 ```
 
 ---
@@ -348,3 +409,8 @@ az account set --subscription "Your Subscription"
 ### YouTube Transcripts
 - [PyPI - youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/)
 - [GitHub - youtube-transcript-api](https://github.com/jdepoix/youtube-transcript-api)
+
+### Vector Databases
+- [The Data Quarry - What makes each vector DB different](https://thedataquarry.com/blog/vector-db-1/)
+- [MyScale - Chroma vs Qdrant vs LanceDB](https://www.myscale.com/blog/milvus-alternatives-chroma-qdrant-lancedb/)
+- [Firecrawl - Best Vector Databases 2025](https://www.firecrawl.dev/blog/best-vector-databases-2025)
