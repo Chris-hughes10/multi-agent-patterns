@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "func-to-script>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -35,8 +36,8 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
@@ -86,6 +87,9 @@ plugins = ["pydantic.mypy"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --cov=src --cov-report=term-missing"
+markers = [
+    "integration: tests that hit external services (YouTube API)",
+]
 
 [tool.coverage.run]
 source = ["src"]

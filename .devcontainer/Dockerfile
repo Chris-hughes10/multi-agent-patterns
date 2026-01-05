@@ -35,7 +35,4 @@ ENV UV_PYTHON=python3.12
 # Switch to non-root user
 USER $USERNAME
 
-# Pre-create venv directory with correct permissions
-RUN mkdir -p /workspace/.venv
-
 CMD ["sleep", "infinity"]

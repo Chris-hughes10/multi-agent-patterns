@@ -90,15 +90,17 @@ class YouTubeTranscriptFetcher:
             )
 
         except TranscriptsDisabled:
-            raise TranscriptFetchError(video_id, "Transcripts are disabled for this video")
+            raise TranscriptFetchError(
+                video_id, "Transcripts are disabled for this video"
+            ) from None
         except NoTranscriptFound:
             raise TranscriptFetchError(
                 video_id, f"No transcript found for languages: {languages}"
-            )
+            ) from None
         except VideoUnavailable:
-            raise TranscriptFetchError(video_id, "Video is unavailable")
+            raise TranscriptFetchError(video_id, "Video is unavailable") from None
         except Exception as e:
-            raise TranscriptFetchError(video_id, str(e))
+            raise TranscriptFetchError(video_id, str(e)) from e
 
 
 def extract_video_id(url_or_id: str) -> str:

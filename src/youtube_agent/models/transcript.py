@@ -1,6 +1,6 @@
 """Data models for YouTube transcripts."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class TranscriptSegment(BaseModel):
