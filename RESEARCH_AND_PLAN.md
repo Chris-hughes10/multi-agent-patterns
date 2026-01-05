@@ -287,24 +287,187 @@ response = client.chat.completions.create(
 
 ---
 
-## 6. Learning Path Recommendation
+## 6. Multi-Agent Architecture (The Fun Part!)
+
+### Why Multi-Agent?
+
+Instead of one monolithic agent, split responsibilities:
+
+| Agent | Responsibility | Tools |
+|-------|----------------|-------|
+| **Search Agent** | Find relevant YouTube videos | youtube-search-python |
+| **Transcript Agent** | Fetch & summarize transcripts | youtube-transcript-api, LLM |
+| **Orchestrator** | Coordinate agents, aggregate results | Agent Framework workflows |
+
+### YouTube Search Options
+
+| Library | API Key? | Best For |
+|---------|----------|----------|
+| **youtube-search-python** | No | Full-featured, recommended |
+| **youtube-search** | No | Simple scraping |
+| **YouTube Data API v3** | Yes | Official, higher limits |
+
+```bash
+pip install youtube-search-python  # No API key needed!
+```
+
+```python
+from youtubesearchpython import VideosSearch
+
+search = VideosSearch('Microsoft Agent Framework tutorial', limit=5)
+for video in search.result()['result']:
+    print(f"{video['title']} - {video['id']}")
+```
+
+### Multi-Agent Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        User Query                                │
+│            "What are the best practices for RAG?"               │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ORCHESTRATOR AGENT                           │
+│         (Coordinates workflow, aggregates results)              │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              ▼                  │                  │
+┌──────────────────────┐         │                  │
+│    SEARCH AGENT      │         │                  │
+│  youtube-search-python│        │                  │
+│  → Find 5 videos     │         │                  │
+└──────────────────────┘         │                  │
+              │                  │                  │
+              ▼                  │                  │
+        [video_ids]              │                  │
+              │                  │                  │
+              ├──────────────────┼──────────────────┤
+              ▼                  ▼                  ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ TRANSCRIPT AGENT │  │ TRANSCRIPT AGENT │  │ TRANSCRIPT AGENT │
+│   (Video 1)      │  │   (Video 2)      │  │   (Video 3)      │
+│  Fetch + Summary │  │  Fetch + Summary │  │  Fetch + Summary │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+              │                  │                  │
+              └──────────────────┼──────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     ORCHESTRATOR AGENT                           │
+│         Aggregates summaries → Final synthesized answer         │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Final Response                              │
+│   "Based on 5 videos, the best practices for RAG are..."       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Microsoft Agent Framework Orchestration Patterns
+
+The framework provides built-in patterns for multi-agent coordination:
+
+| Pattern | Description | Use Case |
+|---------|-------------|----------|
+| **Sequential** | Agents run one after another | Writer → Reviewer |
+| **Concurrent** | Agents run in parallel | Multiple transcript fetches |
+| **Hand-off** | One agent delegates to another | Search → Transcript |
+| **Graph-based** | Complex workflows with conditionals | Full orchestration |
+
+### Conceptual Code Structure
+
+```python
+from agent_framework import Agent, Workflow
+
+# Define specialized agents
+search_agent = Agent(
+    name="SearchAgent",
+    instructions="Search YouTube for videos about the given topic",
+    tools=[youtube_search_tool]
+)
+
+transcript_agent = Agent(
+    name="TranscriptAgent",
+    instructions="Fetch and summarize YouTube video transcripts",
+    tools=[transcript_tool, summarize_tool]
+)
+
+orchestrator = Agent(
+    name="Orchestrator",
+    instructions="""You coordinate research tasks:
+    1. Use SearchAgent to find relevant videos
+    2. Use TranscriptAgent (concurrently) for each video
+    3. Synthesize all summaries into a final answer""",
+    agents=[search_agent, transcript_agent]  # Sub-agents
+)
+
+# Or use graph-based workflow for more control
+workflow = Workflow()
+workflow.add_node("search", search_agent)
+workflow.add_node("transcripts", transcript_agent, parallel=True)
+workflow.add_node("synthesize", synthesize_function)
+workflow.add_edge("search", "transcripts")
+workflow.add_edge("transcripts", "synthesize")
+```
+
+### Updated Implementation Phases
+
+#### Phase 1: Single Agent (Learn the basics)
+- [ ] Simple transcript fetch + summarize agent
+- [ ] Understand Agent Framework fundamentals
+
+#### Phase 2: Add Search Agent
+- [ ] Create YouTube search tool
+- [ ] Build Search Agent
+- [ ] Manual orchestration (call search, then transcript)
+
+#### Phase 3: Multi-Agent Orchestration
+- [ ] Create Orchestrator agent
+- [ ] Implement concurrent transcript fetching
+- [ ] Aggregate results into synthesized answer
+
+#### Phase 4: Advanced Patterns
+- [ ] Add caching (don't re-fetch same videos)
+- [ ] Error handling (video has no transcript)
+- [ ] Human-in-the-loop (approve search results before fetching)
+
+### This Makes Great Blog Content!
+
+Your blog post could follow this progression:
+1. **Part 1**: Single agent basics
+2. **Part 2**: Adding a second agent
+3. **Part 3**: Orchestration patterns
+4. **Part 4**: Production considerations
+
+---
+
+## 7. Learning Path Recommendation
 
 ### Week 1: Foundations
 1. **Read**: [Microsoft Agent Framework Overview](https://learn.microsoft.com/en-us/agent-framework/overview/agent-framework-overview)
 2. **Do**: Complete the [Quick Start Tutorial](https://learn.microsoft.com/en-us/agent-framework/tutorials/quick-start)
 3. **Explore**: [Getting Started Samples](https://github.com/microsoft/agent-framework/tree/main/python/samples/getting_started)
 
-### Week 2: Deeper Dive
-1. **Study**: Workflow patterns in Agent Framework
-2. **Learn**: Azure AI Search fundamentals
-3. **Build**: Simple agent with custom tools
+### Week 2: Single Agent + Tools
+1. **Study**: How to create custom tools in Agent Framework
+2. **Build**: Transcript Agent with youtube-transcript-api
+3. **Learn**: Tool design patterns
 
-### Week 3: Project Work
-1. **Build**: YouTube transcript ingestion pipeline
-2. **Integrate**: Azure AI Search
-3. **Create**: Search and summarization agent
+### Week 3: Multi-Agent Patterns
+1. **Study**: [Workflow documentation](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/overview)
+2. **Build**: Search Agent + Transcript Agent
+3. **Learn**: Orchestration patterns (sequential, concurrent)
 
-### Week 4: Polish & Share
+### Week 4: Full System
+1. **Build**: Orchestrator that coordinates both agents
+2. **Add**: Caching, error handling
+3. **Test**: End-to-end with real queries
+
+### Week 5: Polish & Share
 1. **Refine**: Add UI and error handling
 2. **Write**: Blog post
 3. **Share**: Open source the project
@@ -373,9 +536,10 @@ mkdir youtube-agent && cd youtube-agent
 python -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-# Install core dependencies (minimal)
+# Install core dependencies
 pip install agent-framework --pre
 pip install youtube-transcript-api
+pip install youtube-search-python
 pip install openai
 pip install python-dotenv
 
@@ -414,3 +578,13 @@ echo "OPENAI_API_KEY=your-key-here" > .env
 - [The Data Quarry - What makes each vector DB different](https://thedataquarry.com/blog/vector-db-1/)
 - [MyScale - Chroma vs Qdrant vs LanceDB](https://www.myscale.com/blog/milvus-alternatives-chroma-qdrant-lancedb/)
 - [Firecrawl - Best Vector Databases 2025](https://www.firecrawl.dev/blog/best-vector-databases-2025)
+
+### Multi-Agent Orchestration
+- [Microsoft Learn - Workflows Overview](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/overview)
+- [Microsoft Learn - Orchestrations](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/overview)
+- [Semantic Kernel Blog - Multi-Agent Orchestration](https://devblogs.microsoft.com/semantic-kernel/unlocking-enterprise-ai-complexity-multi-agent-orchestration-with-the-microsoft-agent-framework/)
+- [Workflow Samples](https://github.com/microsoft/agent-framework/tree/main/python/samples/getting_started/workflows)
+
+### YouTube Search
+- [youtube-search-python (PyPI)](https://pypi.org/project/youtube-search-python/)
+- [youtube-search-python (GitHub)](https://github.com/alexmercerind/youtube-search-python)
