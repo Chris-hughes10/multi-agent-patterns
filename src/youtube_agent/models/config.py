@@ -73,6 +73,12 @@ class Settings(BaseSettings):
         description="Directory for storing transcripts and summaries",
     )
 
+    # Proxy settings (for YouTube transcript API)
+    proxy_url: str | None = Field(
+        default=None,
+        description="SOCKS5 or HTTP proxy URL (e.g., socks5://user:pass@host:port)",
+    )
+
     @property
     def is_configured(self) -> bool:
         """Check if Azure OpenAI is properly configured.

@@ -10,6 +10,7 @@ from youtube_transcript_api._errors import (
     VideoUnavailable,
 )
 
+from youtube_agent.models.config import get_settings
 from youtube_agent.models.transcript import (
     Transcript,
     TranscriptResult,
@@ -51,11 +52,17 @@ class TranscriptFetcher(Protocol):
 class YouTubeTranscriptFetcher:
     """Fetches transcripts from YouTube using youtube-transcript-api.
 
-    :param api: Optional YouTubeTranscriptApi instance for dependency injection
+    :param proxy_url: Optional proxy URL (e.g., socks5://user:pass@host:port)
     """
 
-    def __init__(self, api: YouTubeTranscriptApi | None = None) -> None:
-        self._api = api or YouTubeTranscriptApi()
+    def __init__(self, proxy_url: str | None = None) -> None:
+        self._proxy_url = proxy_url
+
+    def _get_proxies(self) -> dict[str, str] | None:
+        """Get proxy configuration for requests."""
+        if self._proxy_url:
+            return {"https": self._proxy_url, "http": self._proxy_url}
+        return None
 
     def fetch(
         self,
@@ -72,12 +79,16 @@ class YouTubeTranscriptFetcher:
         languages = languages or ["en"]
 
         try:
-            transcript_data = self._api.fetch(video_id)
+            transcript_data = YouTubeTranscriptApi.get_transcript(
+                video_id,
+                languages=languages,
+                proxies=self._get_proxies(),
+            )
             segments = [
                 TranscriptSegment(
-                    text=entry.text,
-                    start=entry.start,
-                    duration=entry.duration,
+                    text=entry["text"],
+                    start=entry["start"],
+                    duration=entry["duration"],
                 )
                 for entry in transcript_data
             ]
@@ -146,6 +157,8 @@ def fetch_transcript(
     This is the primary function to use for fetching transcripts.
     It handles URL parsing and returns a complete result with metadata.
 
+    Uses proxy from settings if configured (PROXY_URL environment variable).
+
     :param url_or_id: YouTube URL or video ID
     :param languages: Preferred languages, defaults to ['en']
     :param fetcher: Optional custom fetcher for dependency injection
@@ -159,7 +172,10 @@ def fetch_transcript(
         print(result.transcript.full_text)
     """
     video_id = extract_video_id(url_or_id)
-    fetcher = fetcher or YouTubeTranscriptFetcher()
+
+    if fetcher is None:
+        settings = get_settings()
+        fetcher = YouTubeTranscriptFetcher(proxy_url=settings.proxy_url)
 
     transcript = fetcher.fetch(video_id, languages)
 

@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "func-to-script>=1.1.0",
     "azure-identity>=1.25.1",
+    "pysocks>=1.7.1",
 ]
 
 [project.optional-dependencies]

@@ -198,9 +198,9 @@ YouTube blocks transcript requests from cloud provider IPs (AWS, Azure, GCP, etc
 
 **Current Status:** Search works (HTML scraping), but transcript fetching is blocked in cloud environments.
 
-**Planned Solution:** Add proxy support to route transcript requests through a VPN/proxy service.
+**Solution:** Added proxy support to route transcript requests through a VPN/proxy service.
 
-### Next Steps: Proxy Support
+### Proxy Support (Implemented)
 
 1. **Add proxy configuration to Settings**
    ```python
