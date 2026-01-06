@@ -9,6 +9,7 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     VideoUnavailable,
 )
+from youtube_transcript_api.proxies import GenericProxyConfig
 
 from youtube_agent.models.config import get_settings
 from youtube_agent.models.transcript import (
@@ -52,17 +53,18 @@ class TranscriptFetcher(Protocol):
 class YouTubeTranscriptFetcher:
     """Fetches transcripts from YouTube using youtube-transcript-api.
 
-    :param proxy_url: Optional proxy URL (e.g., socks5://user:pass@host:port)
+    :param proxy_url: Optional proxy URL (e.g., http://user:pass@host:port)
     """
 
     def __init__(self, proxy_url: str | None = None) -> None:
         self._proxy_url = proxy_url
 
-    def _get_proxies(self) -> dict[str, str] | None:
-        """Get proxy configuration for requests."""
+    def _create_api(self) -> YouTubeTranscriptApi:
+        """Create YouTubeTranscriptApi instance with optional proxy."""
         if self._proxy_url:
-            return {"https": self._proxy_url, "http": self._proxy_url}
-        return None
+            proxy_config = GenericProxyConfig(https_url=self._proxy_url)
+            return YouTubeTranscriptApi(proxy_config=proxy_config)
+        return YouTubeTranscriptApi()
 
     def fetch(
         self,
@@ -79,18 +81,15 @@ class YouTubeTranscriptFetcher:
         languages = languages or ["en"]
 
         try:
-            transcript_data = YouTubeTranscriptApi.get_transcript(
-                video_id,
-                languages=languages,
-                proxies=self._get_proxies(),
-            )
+            api = self._create_api()
+            fetched = api.fetch(video_id, languages=languages)
             segments = [
                 TranscriptSegment(
-                    text=entry["text"],
-                    start=entry["start"],
-                    duration=entry["duration"],
+                    text=snippet.text,
+                    start=snippet.start,
+                    duration=snippet.duration,
                 )
-                for entry in transcript_data
+                for snippet in fetched
             ]
 
             return Transcript(
