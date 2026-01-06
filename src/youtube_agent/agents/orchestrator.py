@@ -1,6 +1,7 @@
 """Orchestrator Agent - coordinates all sub-agents."""
 
 import asyncio
+import logging
 from typing import Annotated
 
 from agent_framework import ChatAgent
@@ -11,11 +12,13 @@ from youtube_agent.agents.search_agent import create_search_agent
 from youtube_agent.agents.summarize_agent import create_summarize_agent
 from youtube_agent.agents.transcript_agent import create_transcript_agent
 
+logger = logging.getLogger("youtube_agent.orchestrator")
+
 ORCHESTRATOR_INSTRUCTIONS = """You are the Orchestrator Agent for a YouTube research system. You coordinate specialized agents to help users research topics using YouTube videos.
 
 Your available agents:
 1. **SearchAgent** - Searches YouTube for videos on a topic
-2. **TranscriptAgent** - Fetches, stores, and retrieves video transcripts
+2. **TranscriptAgent** - Fetches, stores, and retrieves video transcripts (also lists stored transcripts)
 3. **SummarizeAgent** - Summarizes transcripts and synthesizes information
 
 ## How to handle requests:
@@ -24,18 +27,21 @@ Your available agents:
 → Use SearchAgent to find relevant videos
 
 **For "get transcript for video X":**
-→ Use TranscriptAgent to fetch the transcript
+→ Use TranscriptAgent to fetch the transcript (automatically uses cache if available)
 
 **For "summarize video X":**
 → Use SummarizeAgent to summarize the video
 
 **For "research topic X" or "what do YouTube videos say about X":**
-1. Use SearchAgent to find relevant videos
-2. Use TranscriptAgent to fetch transcripts for top results
-3. Use SummarizeAgent to summarize each transcript
-4. Synthesize the summaries into a comprehensive answer
+1. FIRST: Ask TranscriptAgent to list stored transcripts - you may already have relevant data!
+2. Use SearchAgent to find new videos on the topic
+3. Use TranscriptAgent to fetch transcripts (it will use cache when available)
+4. Use SummarizeAgent to summarize transcripts
+5. Synthesize the summaries into a comprehensive answer
 
 ## Response guidelines:
+- Check stored transcripts first to avoid redundant work
+- TranscriptAgent automatically uses cached transcripts when available
 - Decide the output format based on user intent (detailed vs concise)
 - For research queries, synthesize insights from multiple videos
 - Always cite which videos information came from
@@ -102,10 +108,12 @@ class OrchestratorAgent:
         :param request: What to search for (e.g., "Find videos about RAG best practices")
         :return: Search results from the agent
         """
+        logger.debug("SearchAgent called with: %s", request)
         agent = self._get_search_agent()
 
         async def _run() -> str:
             result = await agent.run(request)
+            logger.debug("SearchAgent response: %s", result.text[:200] if result.text else "empty")
             return result.text
 
         return self._run_sync(_run())
@@ -121,10 +129,14 @@ class OrchestratorAgent:
         :param request: What to do (e.g., "Fetch transcript for video dQw4w9WgXcQ")
         :return: Response from the transcript agent
         """
+        logger.debug("TranscriptAgent called with: %s", request)
         agent = self._get_transcript_agent()
 
         async def _run() -> str:
             result = await agent.run(request)
+            logger.debug(
+                "TranscriptAgent response: %s", result.text[:200] if result.text else "empty"
+            )
             return result.text
 
         return self._run_sync(_run())
@@ -140,10 +152,14 @@ class OrchestratorAgent:
         :param request: What to summarize (e.g., "Summarize video dQw4w9WgXcQ")
         :return: Summary from the agent
         """
+        logger.debug("SummarizeAgent called with: %s", request)
         agent = self._get_summarize_agent()
 
         async def _run() -> str:
             result = await agent.run(request)
+            logger.debug(
+                "SummarizeAgent response: %s", result.text[:200] if result.text else "empty"
+            )
             return result.text
 
         return self._run_sync(_run())
@@ -173,8 +189,11 @@ class OrchestratorAgent:
         :param user_request: The user's request
         :return: The orchestrator's response
         """
+        logger.debug("Orchestrator received request: %s", user_request)
         orchestrator = self.get_orchestrator()
+        logger.debug("Calling Azure OpenAI...")
         result = await orchestrator.run(user_request)
+        logger.debug("Orchestrator completed")
         return result.text
 
 

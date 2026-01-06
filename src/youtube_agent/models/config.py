@@ -103,3 +103,18 @@ def get_settings() -> Settings:
     :return: Settings instance loaded from environment
     """
     return Settings()
+
+
+# Runtime configuration (can be changed at startup)
+class RuntimeConfig:
+    """Runtime configuration that can be modified during execution."""
+
+    auto_store_transcripts: bool = True
+
+
+_runtime_config = RuntimeConfig()
+
+
+def get_runtime_config() -> RuntimeConfig:
+    """Get the runtime configuration instance."""
+    return _runtime_config

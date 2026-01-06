@@ -1,13 +1,17 @@
 """Transcript Agent - manages YouTube video transcripts."""
 
+import logging
 from typing import Annotated
 
 from agent_framework import ChatAgent
 from pydantic import Field
 
 from youtube_agent.agents.client import get_chat_client
+from youtube_agent.models.config import get_runtime_config
 from youtube_agent.tools.storage import TranscriptStorage, load_transcript, save_transcript
 from youtube_agent.tools.transcript import fetch_transcript
+
+logger = logging.getLogger("youtube_agent.transcript_agent")
 
 TRANSCRIPT_AGENT_INSTRUCTIONS = """You are a Transcript Agent. Your job is to manage YouTube video transcripts.
 
@@ -33,13 +37,35 @@ def fetch_video_transcript(
         str, Field(description="YouTube video URL or video ID to fetch transcript for")
     ],
 ) -> str:
-    """Fetch transcript from a YouTube video.
+    """Fetch transcript from a YouTube video, using cached version if available.
+
+    Checks storage first to avoid re-fetching. If not cached, fetches from
+    YouTube and optionally saves to storage.
 
     :param video_url_or_id: YouTube URL or video ID
     :return: The full transcript text
     """
+    from youtube_agent.tools.transcript import extract_video_id
+
     try:
+        # Extract video ID to check storage
+        video_id = extract_video_id(video_url_or_id)
+
+        # Check if we already have this transcript
+        stored = load_transcript(video_id)
+        if stored:
+            logger.debug("Cache hit for video %s: %s", video_id, stored.metadata.title)
+            return f"Transcript for '{stored.metadata.title}' (from cache):\n\n{stored.transcript.full_text}"
+
+        # Not cached, fetch from YouTube
+        logger.debug("Cache miss for video %s, fetching from YouTube", video_id)
         result = fetch_transcript(video_url_or_id)
+
+        # Save if auto-store is enabled
+        config = get_runtime_config()
+        if config.auto_store_transcripts:
+            save_transcript(result)
+
         return f"Transcript for '{result.metadata.title}':\n\n{result.transcript.full_text}"
     except Exception as e:
         return f"Error fetching transcript: {e}"

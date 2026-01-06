@@ -2,13 +2,63 @@
 
 import argparse
 import asyncio
+import logging
 import sys
 
 from youtube_agent.agents.orchestrator import create_orchestrator
+from youtube_agent.agents.status import setup_status_monitoring
+from youtube_agent.models.config import get_runtime_config
 from youtube_agent.tools.search import search_youtube_formatted
 from youtube_agent.tools.storage import TranscriptStorage
 from youtube_agent.tools.summarize import summarize_video
 from youtube_agent.tools.transcript import fetch_transcript
+
+logger = logging.getLogger("youtube_agent")
+
+
+def setup_logging(debug: bool = False) -> str | None:
+    """Configure logging for the application.
+
+    :param debug: If True, enable DEBUG level logging
+    :return: Path to log file if debug mode, None otherwise
+    """
+    from datetime import datetime
+    from pathlib import Path
+
+    level = logging.DEBUG if debug else logging.WARNING
+    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    date_format = "%H:%M:%S"
+
+    # Basic console logging
+    logging.basicConfig(
+        level=level,
+        format=log_format,
+        datefmt=date_format,
+    )
+
+    log_file_path = None
+
+    # Also log to file in debug mode
+    if debug:
+        log_dir = Path("data/logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file_path = log_dir / f"session_{timestamp}.log"
+
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+
+        # Add file handler to root logger
+        logging.getLogger().addHandler(file_handler)
+
+        # Enable debug for httpx/openai to see API calls
+        logging.getLogger("httpx").setLevel(logging.DEBUG)
+        logging.getLogger("openai").setLevel(logging.DEBUG)
+
+        logger.info("Logging to file: %s", log_file_path)
+
+    return str(log_file_path) if log_file_path else None
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -25,6 +75,11 @@ def cmd_transcript(args: argparse.Namespace) -> None:
         print(f"Channel: {result.metadata.channel}")
         print(f"Duration: {result.transcript.duration_seconds:.0f} seconds")
         print(f"\n{result.transcript.full_text}")
+
+        if args.save:
+            storage = TranscriptStorage()
+            storage.save(result)
+            print(f"\n(Saved to data/transcripts/{result.metadata.video_id}.json)")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -129,6 +184,12 @@ def main() -> None:
         prog="youtube-agent",
         description="YouTube Agent - search, fetch transcripts, summarize, and research videos",
     )
+    parser.add_argument(
+        "--debug", action="store_true", help="Enable debug logging to see what's happening"
+    )
+    parser.add_argument(
+        "--status", action="store_true", help="Show human-friendly status updates"
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # search command
@@ -144,6 +205,9 @@ def main() -> None:
         "transcript", help="Fetch transcript for a video"
     )
     transcript_parser.add_argument("video", help="YouTube video URL or ID")
+    transcript_parser.add_argument(
+        "--save", action="store_true", help="Save transcript to data/transcripts/"
+    )
     transcript_parser.set_defaults(func=cmd_transcript)
 
     # summarize command
@@ -170,13 +234,29 @@ def main() -> None:
     chat_parser.add_argument(
         "request", nargs="?", help="Single request (interactive if not provided)"
     )
+    chat_parser.add_argument(
+        "--no-store", action="store_true", help="Don't auto-save transcripts to storage"
+    )
     chat_parser.set_defaults(func=cmd_chat)
 
     args = parser.parse_args()
+    log_file = setup_logging(args.debug)
+    if log_file:
+        print(f"Debug logs: {log_file}")
+
+    # Enable status monitoring if requested (or if debug is on)
+    if args.status or args.debug:
+        setup_status_monitoring()
+
+    # Configure auto-store based on --no-store flag (for chat command)
+    no_store = getattr(args, "no_store", False)
+    if no_store:
+        get_runtime_config().auto_store_transcripts = False
 
     if args.command is None:
         # Default to chat if no command specified
         args.request = None
+        args.no_store = False  # Default value for interactive mode
         cmd_chat(args)
     else:
         args.func(args)
