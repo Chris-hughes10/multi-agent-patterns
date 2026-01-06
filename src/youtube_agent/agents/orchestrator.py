@@ -5,9 +5,11 @@ import logging
 from typing import Annotated
 
 from agent_framework import ChatAgent
+from agent_framework._threads import AgentThread
 from pydantic import Field
 
 from youtube_agent.agents.client import get_chat_client
+from youtube_agent.agents.context import TranscriptContextProvider
 from youtube_agent.agents.search_agent import create_search_agent
 from youtube_agent.agents.summarize_agent import create_summarize_agent
 from youtube_agent.agents.transcript_agent import create_transcript_agent
@@ -18,10 +20,19 @@ ORCHESTRATOR_INSTRUCTIONS = """You are the Orchestrator Agent for a YouTube rese
 
 Your available agents:
 1. **SearchAgent** - Searches YouTube for videos on a topic
-2. **TranscriptAgent** - Fetches, stores, and retrieves video transcripts (also lists stored transcripts)
-3. **SummarizeAgent** - Summarizes transcripts and synthesizes information
+2. **TranscriptAgent** - Fetches, stores, and retrieves video transcripts (the ONLY agent that fetches from YouTube)
+3. **SummarizeAgent** - Summarizes text or stored transcripts (does NOT fetch)
+
+## Memory: Available Transcripts
+You have access to a memory section called "Available Transcripts" that shows all stored transcripts.
+ALWAYS check this memory first before searching YouTube - you may already have the data you need!
 
 ## How to handle requests:
+
+**For questions about specific content (e.g., "what did X say about Y"):**
+→ Check your "Available Transcripts" memory for relevant videos
+→ If relevant transcripts exist, use TranscriptAgent to look up the specific video and search within it
+→ Only search YouTube if no relevant stored transcripts are found in memory
 
 **For "search for videos about X":**
 → Use SearchAgent to find relevant videos
@@ -30,17 +41,23 @@ Your available agents:
 → Use TranscriptAgent to fetch the transcript (automatically uses cache if available)
 
 **For "summarize video X":**
-→ Use SummarizeAgent to summarize the video
+→ FIRST use TranscriptAgent to fetch/retrieve the transcript
+→ THEN use SummarizeAgent to summarize the text returned by TranscriptAgent
 
 **For "research topic X" or "what do YouTube videos say about X":**
-1. FIRST: Ask TranscriptAgent to list stored transcripts - you may already have relevant data!
-2. Use SearchAgent to find new videos on the topic
+1. Check "Available Transcripts" memory - you may already have relevant data!
+2. Use SearchAgent to find new videos on the topic (if needed)
 3. Use TranscriptAgent to fetch transcripts (it will use cache when available)
-4. Use SummarizeAgent to summarize transcripts
+4. Pass the transcript text to SummarizeAgent to summarize
 5. Synthesize the summaries into a comprehensive answer
 
+## IMPORTANT: Workflow for summarization
+The SummarizeAgent cannot fetch transcripts itself. Always:
+1. Get transcript text via TranscriptAgent first
+2. Pass that text to SummarizeAgent
+
 ## Response guidelines:
-- Check stored transcripts first to avoid redundant work
+- CHECK YOUR MEMORY for stored transcripts before doing new searches
 - TranscriptAgent automatically uses cached transcripts when available
 - Decide the output format based on user intent (detailed vs concise)
 - For research queries, synthesize insights from multiple videos
@@ -53,6 +70,10 @@ class OrchestratorAgent:
 
     This class manages the lifecycle of sub-agents and provides
     tool wrappers that the orchestrator can use to delegate work.
+
+    The orchestrator maintains conversation memory via an AgentThread,
+    and uses a TranscriptContextProvider to inject information about
+    stored transcripts before each agent call.
     """
 
     def __init__(self) -> None:
@@ -61,6 +82,8 @@ class OrchestratorAgent:
         self._transcript_agent: ChatAgent | None = None
         self._summarize_agent: ChatAgent | None = None
         self._orchestrator: ChatAgent | None = None
+        self._thread: AgentThread | None = None
+        self._context_provider: TranscriptContextProvider | None = None
 
     def _get_search_agent(self) -> ChatAgent:
         """Lazy initialization of search agent."""
@@ -183,18 +206,42 @@ class OrchestratorAgent:
             )
         return self._orchestrator
 
+    def _get_context_provider(self) -> TranscriptContextProvider:
+        """Lazy initialization of context provider."""
+        if self._context_provider is None:
+            self._context_provider = TranscriptContextProvider()
+        return self._context_provider
+
     async def run(self, user_request: str) -> str:
         """Run the orchestrator with a user request.
+
+        Uses the same AgentThread across calls to maintain conversation memory,
+        and a TranscriptContextProvider to inject context about stored transcripts.
 
         :param user_request: The user's request
         :return: The orchestrator's response
         """
         logger.debug("Orchestrator received request: %s", user_request)
         orchestrator = self.get_orchestrator()
+
+        # Create thread on first run with context provider, reuse for conversation memory
+        if self._thread is None:
+            context_provider = self._get_context_provider()
+            self._thread = orchestrator.get_new_thread(context_provider=context_provider)
+
         logger.debug("Calling Azure OpenAI...")
-        result = await orchestrator.run(user_request)
+        result = await orchestrator.run(user_request, thread=self._thread)
         logger.debug("Orchestrator completed")
         return result.text
+
+    def reset_conversation(self) -> None:
+        """Reset the conversation memory and context.
+
+        Call this to start a fresh conversation without previous context.
+        """
+        self._thread = None
+        if self._context_provider is not None:
+            self._context_provider.reset()
 
 
 def create_orchestrator() -> OrchestratorAgent:

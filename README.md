@@ -2,6 +2,13 @@
 
 Multi-agent system for YouTube transcript search and summarization using Microsoft Agent Framework.
 
+## Features
+
+- **Multi-agent architecture**: Orchestrator coordinates specialized Search, Transcript, and Summarize agents
+- **Conversation memory**: The agent remembers context from previous messages in the session
+- **Smart caching**: Transcripts are automatically cached to avoid re-fetching
+- **Context-aware**: The agent automatically knows what transcripts are stored and uses them before searching YouTube
+
 ## Setup
 
 ```bash
@@ -20,10 +27,20 @@ AZURE_TENANT_ID=your-tenant-id
 
 # Optional: YouTube Data API key for higher rate limits
 # YOUTUBE_API_KEY=your-youtube-api-key
-
-# Optional: Proxy URL if YouTube blocks your IP
-# PROXY_URL=http://user:pass@host:port
 ```
+
+### Proxy Configuration (Important for Cloud/CI environments)
+
+YouTube blocks requests from most data center IP addresses (AWS, Azure, GCP, GitHub Codespaces, etc.). If you're running this agent in a cloud environment, you'll need a **residential proxy** to fetch transcripts.
+
+```bash
+# Add to your .env file
+PROXY_URL=http://user:pass@your-residential-proxy:port
+```
+
+> **Note**: Standard data center proxies won't work - YouTube specifically blocks these. You'll need a residential proxy service (e.g., Bright Data, Oxylabs, SmartProxy) that routes through real residential IPs.
+
+If you see errors like `TranscriptsDisabled` or connection timeouts when fetching transcripts, this is likely the cause.
 
 ## Usage
 
@@ -91,19 +108,49 @@ Retrieve a previously saved transcript:
 uv run youtube-agent lookup VIDEO_ID
 ```
 
-### Debug and Status Options
+### Debug Mode
 
-Monitor what's happening during execution:
+Human-friendly status updates (e.g., `[15:55:22] .. Thinking...`) are always shown by default.
+
+For full debug logging:
 
 ```bash
-# Human-friendly status updates
-uv run youtube-agent --status chat "summarize a video about Python"
-
-# Full debug logging (also enables status)
 uv run youtube-agent --debug chat "summarize a video about Python"
 ```
 
-Debug mode writes logs to `data/logs/session_TIMESTAMP.log` for later analysis.
+Debug mode writes detailed logs to `data/logs/session_TIMESTAMP.log` for troubleshooting.
+
+## Architecture
+
+The system uses a multi-agent architecture:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Orchestrator                         │
+│  - Coordinates all agents                               │
+│  - Maintains conversation memory (AgentThread)          │
+│  - Receives context about stored transcripts            │
+└─────────────────────────────────────────────────────────┘
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+   ┌─────────┐ ┌──────────┐ ┌───────────┐
+   │ Search  │ │Transcript│ │ Summarize │
+   │  Agent  │ │  Agent   │ │   Agent   │
+   └─────────┘ └──────────┘ └───────────┘
+        │           │              │
+        ▼           ▼              ▼
+   YouTube API   YouTube     Azure OpenAI
+                Transcripts
+```
+
+- **SearchAgent**: Searches YouTube for videos
+- **TranscriptAgent**: Fetches and caches video transcripts (the only agent that fetches from YouTube)
+- **SummarizeAgent**: Summarizes text content (does not fetch)
+
+### Context Provider
+
+The `TranscriptContextProvider` automatically injects information about stored transcripts before each agent call. This allows the orchestrator to make smart decisions about when to use cached data vs. searching YouTube.
 
 ## Development
 

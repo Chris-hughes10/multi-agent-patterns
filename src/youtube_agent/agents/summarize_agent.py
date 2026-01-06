@@ -7,14 +7,13 @@ from pydantic import Field
 
 from youtube_agent.agents.client import get_chat_client
 from youtube_agent.tools.storage import load_transcript
-from youtube_agent.tools.summarize import TranscriptSummarizer, summarize_video
+from youtube_agent.tools.summarize import TranscriptSummarizer
 
-SUMMARIZE_AGENT_INSTRUCTIONS = """You are a Summarize Agent. Your job is to generate summaries from YouTube video transcripts.
+SUMMARIZE_AGENT_INSTRUCTIONS = """You are a Summarize Agent. Your job is to generate summaries from text content.
 
 You can:
-1. Summarize a video directly by URL/ID (fetches and summarizes)
-2. Summarize a stored transcript by video ID
-3. Summarize arbitrary text provided to you
+1. Summarize a stored transcript by video ID
+2. Summarize arbitrary text provided to you
 
 When summarizing:
 - Capture the main topic and key points
@@ -22,31 +21,8 @@ When summarizing:
 - Keep summaries concise but informative
 - Preserve any significant quotes or statistics
 
-You only summarize - you do not search or fetch transcripts. Other agents handle those tasks."""
-
-
-def summarize_youtube_video(
-    video_url_or_id: Annotated[
-        str, Field(description="YouTube video URL or video ID to summarize")
-    ],
-    save: Annotated[
-        bool, Field(description="Whether to save the transcript and summary")
-    ] = True,
-) -> str:
-    """Fetch, summarize, and optionally save a YouTube video.
-
-    :param video_url_or_id: YouTube URL or video ID
-    :param save: Whether to save to storage (default True)
-    :return: The summary text
-    """
-    try:
-        result = summarize_video(video_url_or_id, save=save)
-        output = f"Summary of '{result.metadata.title}':\n\n{result.summary}"
-        if save:
-            output += f"\n\n(Saved with ID: {result.video_id})"
-        return output
-    except Exception as e:
-        return f"Error summarizing video: {e}"
+IMPORTANT: You do NOT fetch transcripts yourself. The TranscriptAgent handles fetching.
+If given transcript text directly, summarize it. If given a video ID, use summarize_stored_transcript."""
 
 
 def summarize_stored_transcript(
@@ -110,7 +86,6 @@ def create_summarize_agent() -> ChatAgent:
         name="SummarizeAgent",
         instructions=SUMMARIZE_AGENT_INSTRUCTIONS,
         tools=[
-            summarize_youtube_video,
             summarize_stored_transcript,
             summarize_text,
         ],

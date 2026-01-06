@@ -4,7 +4,7 @@ import logging
 import sys
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TextIO
 
@@ -156,13 +156,18 @@ def setup_status_monitoring() -> StatusMonitor:
     handler = StatusLogHandler(monitor)
     handler.setLevel(logging.DEBUG)
 
-    # Attach to relevant loggers and ensure they emit DEBUG messages
-    # (even if root logger is at WARNING level)
-    for logger_name in ["youtube_agent", "httpx"]:
-        log = logging.getLogger(logger_name)
-        log.addHandler(handler)
-        # Ensure logger level allows DEBUG messages to flow to our handler
-        if log.level == logging.NOTSET or log.level > logging.DEBUG:
-            log.setLevel(logging.DEBUG)
+    # Attach to youtube_agent logger and ensure it emits DEBUG messages
+    youtube_logger = logging.getLogger("youtube_agent")
+    youtube_logger.addHandler(handler)
+    if youtube_logger.level == logging.NOTSET or youtube_logger.level > logging.DEBUG:
+        youtube_logger.setLevel(logging.DEBUG)
+
+    # For httpx: attach our handler to get "Calling AI service..." status,
+    # but set propagate=False so raw HTTP logs don't flood the console
+    # (they'll still go to file if --debug is used)
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.addHandler(handler)
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.propagate = False
 
     return monitor

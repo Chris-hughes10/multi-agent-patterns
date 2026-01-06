@@ -187,9 +187,7 @@ def main() -> None:
     parser.add_argument(
         "--debug", action="store_true", help="Enable debug logging to see what's happening"
     )
-    parser.add_argument(
-        "--status", action="store_true", help="Show human-friendly status updates"
-    )
+    parser.add_argument("--status", action="store_true", help="Show human-friendly status updates")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # search command
@@ -201,9 +199,7 @@ def main() -> None:
     search_parser.set_defaults(func=cmd_search)
 
     # transcript command
-    transcript_parser = subparsers.add_parser(
-        "transcript", help="Fetch transcript for a video"
-    )
+    transcript_parser = subparsers.add_parser("transcript", help="Fetch transcript for a video")
     transcript_parser.add_argument("video", help="YouTube video URL or ID")
     transcript_parser.add_argument(
         "--save", action="store_true", help="Save transcript to data/transcripts/"
@@ -213,9 +209,7 @@ def main() -> None:
     # summarize command
     summarize_parser = subparsers.add_parser("summarize", help="Summarize a video")
     summarize_parser.add_argument("video", help="YouTube video URL or ID")
-    summarize_parser.add_argument(
-        "--no-save", action="store_true", help="Don't save to storage"
-    )
+    summarize_parser.add_argument("--no-save", action="store_true", help="Don't save to storage")
     summarize_parser.set_defaults(func=cmd_summarize)
 
     # list command
@@ -228,9 +222,7 @@ def main() -> None:
     lookup_parser.set_defaults(func=cmd_lookup)
 
     # chat command
-    chat_parser = subparsers.add_parser(
-        "chat", help="Interactive chat with the orchestrator agent"
-    )
+    chat_parser = subparsers.add_parser("chat", help="Interactive chat with the orchestrator agent")
     chat_parser.add_argument(
         "request", nargs="?", help="Single request (interactive if not provided)"
     )
@@ -244,9 +236,8 @@ def main() -> None:
     if log_file:
         print(f"Debug logs: {log_file}")
 
-    # Enable status monitoring if requested (or if debug is on)
-    if args.status or args.debug:
-        setup_status_monitoring()
+    # Always enable human-friendly status updates
+    setup_status_monitoring()
 
     # Configure auto-store based on --no-store flag (for chat command)
     no_store = getattr(args, "no_store", False)
