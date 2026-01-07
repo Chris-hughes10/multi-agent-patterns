@@ -4,14 +4,18 @@ This module contains all YouTube-related business logic, organized by domain
 (DDD-aligned) rather than by functionality. Both search and transcript fetching
 belong to the YouTube bounded context as they share domain concepts like
 video_id, channel, and transcript.
+
+Search functions are async to avoid blocking the event loop.
+Transcript fetching uses asyncio.to_thread() to wrap the sync third-party library.
 """
 
+import asyncio
 import json
 import re
 import urllib.parse
-import urllib.request
 from typing import Protocol
 
+import httpx
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     NoTranscriptFound,
@@ -174,29 +178,14 @@ def extract_video_id(url_or_id: str) -> str:
     raise ValueError(f"Could not extract video ID from: {url_or_id}")
 
 
-def fetch_transcript(
+def _fetch_transcript_sync(
     url_or_id: str,
     languages: list[str] | None = None,
     fetcher: TranscriptFetcher | None = None,
 ) -> TranscriptResult:
-    """Fetch a transcript from YouTube - main entry point.
+    """Synchronous implementation of transcript fetching.
 
-    This is the primary function to use for fetching transcripts.
-    It handles URL parsing and returns a complete result with metadata.
-
-    Uses proxy from settings if configured (PROXY_URL environment variable).
-
-    :param url_or_id: YouTube URL or video ID
-    :param languages: Preferred languages, defaults to ['en']
-    :param fetcher: Optional custom fetcher for dependency injection
-    :return: TranscriptResult with transcript and metadata
-    :raises TranscriptFetchError: If transcript cannot be fetched
-    :raises ValueError: If video ID cannot be extracted from URL
-
-    Example::
-
-        result = fetch_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        print(result.transcript.full_text)
+    This is the internal sync version. Use fetch_transcript() for the async API.
     """
     video_id = extract_video_id(url_or_id)
 
@@ -209,6 +198,36 @@ def fetch_transcript(
     metadata = VideoMetadata(video_id=video_id)
 
     return TranscriptResult(metadata=metadata, transcript=transcript)
+
+
+async def fetch_transcript(
+    url_or_id: str,
+    languages: list[str] | None = None,
+    fetcher: TranscriptFetcher | None = None,
+) -> TranscriptResult:
+    """Fetch a transcript from YouTube - main entry point.
+
+    This is the primary function to use for fetching transcripts.
+    It handles URL parsing and returns a complete result with metadata.
+
+    Uses asyncio.to_thread() to run the sync youtube-transcript-api
+    in a thread pool, avoiding blocking the event loop.
+
+    Uses proxy from settings if configured (PROXY_URL environment variable).
+
+    :param url_or_id: YouTube URL or video ID
+    :param languages: Preferred languages, defaults to ['en']
+    :param fetcher: Optional custom fetcher for dependency injection
+    :return: TranscriptResult with transcript and metadata
+    :raises TranscriptFetchError: If transcript cannot be fetched
+    :raises ValueError: If video ID cannot be extracted from URL
+
+    Example::
+
+        result = await fetch_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        print(result.transcript.full_text)
+    """
+    return await asyncio.to_thread(_fetch_transcript_sync, url_or_id, languages, fetcher)
 
 
 # =============================================================================
@@ -257,35 +276,33 @@ def _extract_videos_from_html(html: str, max_results: int) -> list[dict]:
                     channel_runs = video_renderer.get("ownerText", {}).get("runs", [])
                     channel = channel_runs[0].get("text", "") if channel_runs else ""
 
-                    duration_text = video_renderer.get("lengthText", {}).get(
-                        "simpleText", ""
-                    )
+                    duration_text = video_renderer.get("lengthText", {}).get("simpleText", "")
 
-                    view_count_text = video_renderer.get("viewCountText", {}).get(
-                        "simpleText"
-                    )
+                    view_count_text = video_renderer.get("viewCountText", {}).get("simpleText")
 
-                    published_text = video_renderer.get("publishedTimeText", {}).get(
-                        "simpleText"
-                    )
+                    published_text = video_renderer.get("publishedTimeText", {}).get("simpleText")
 
                     if video_id and title:
-                        videos.append({
-                            "video_id": video_id,
-                            "title": title,
-                            "channel": channel,
-                            "duration": duration_text,
-                            "view_count": view_count_text,
-                            "published_time": published_text,
-                        })
+                        videos.append(
+                            {
+                                "video_id": video_id,
+                                "title": title,
+                                "channel": channel,
+                                "duration": duration_text,
+                                "view_count": view_count_text,
+                                "published_time": published_text,
+                            }
+                        )
     except (KeyError, IndexError, TypeError):
         pass
 
     return videos
 
 
-def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchResult]:
+async def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchResult]:
     """Search YouTube for videos matching the query.
+
+    This is an async function that uses httpx for non-blocking HTTP requests.
 
     :param query: Search query string
     :param max_results: Maximum number of results (default 5)
@@ -310,9 +327,10 @@ def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchResult]:
             "Accept-Language": "en-US,en;q=0.9",
         }
 
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=10) as response:
-            html = response.read().decode("utf-8")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            html = response.text
 
         # Extract videos from HTML
         video_data = _extract_videos_from_html(html, max_results)
@@ -329,5 +347,7 @@ def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchResult]:
             for v in video_data
         ]
 
+    except YouTubeSearchError:
+        raise
     except Exception as e:
         raise YouTubeSearchError(query, str(e)) from e

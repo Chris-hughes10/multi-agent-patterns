@@ -1,5 +1,7 @@
 """Tests for transcript summarization functionality."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from youtube_agent.models.transcript import (
@@ -112,7 +114,7 @@ class TestSummarizationIntegration:
     to be set in the environment.
     """
 
-    def test_summarize_produces_meaningful_output(
+    async def test_summarize_produces_meaningful_output(
         self, sample_transcript_result: TranscriptResult
     ) -> None:
         """Should produce a summary that reflects the transcript content."""
@@ -121,7 +123,7 @@ class TestSummarizationIntegration:
         except SummarizationError:
             pytest.skip("Azure OpenAI not configured")
 
-        summary = summarizer.summarize_result(sample_transcript_result)
+        summary = await summarizer.summarize_result(sample_transcript_result)
 
         # Summary should be non-empty
         assert len(summary) > 50
@@ -133,7 +135,9 @@ class TestSummarizationIntegration:
             for keyword in ["python", "programming", "variable", "tutorial"]
         ), f"Summary should mention the topic. Got: {summary}"
 
-    def test_summarize_with_custom_prompt(self, sample_transcript_result: TranscriptResult) -> None:
+    async def test_summarize_with_custom_prompt(
+        self, sample_transcript_result: TranscriptResult
+    ) -> None:
         """Should respect custom system prompts."""
         try:
             summarizer = TranscriptSummarizer()
@@ -141,12 +145,14 @@ class TestSummarizationIntegration:
             pytest.skip("Azure OpenAI not configured")
 
         custom_prompt = "Summarize this transcript in exactly 3 bullet points."
-        summary = summarizer.summarize_result(sample_transcript_result, system_prompt=custom_prompt)
+        summary = await summarizer.summarize_result(
+            sample_transcript_result, system_prompt=custom_prompt
+        )
 
         # Should have produced some output
         assert len(summary) > 20
 
-    def test_summarize_includes_video_title_context(
+    async def test_summarize_includes_video_title_context(
         self, sample_transcript_result: TranscriptResult
     ) -> None:
         """Should use video title for better context."""
@@ -156,14 +162,14 @@ class TestSummarizationIntegration:
             pytest.skip("Azure OpenAI not configured")
 
         # The summarizer should include title in context
-        summary = summarizer.summarize(
+        summary = await summarizer.summarize(
             transcript_text=sample_transcript_result.transcript.full_text,
             video_title="Introduction to Python Programming",
         )
 
         assert len(summary) > 50
 
-    def test_summarize_transcript_saves_to_storage(
+    async def test_summarize_transcript_saves_to_storage(
         self, sample_transcript_result: TranscriptResult, tmp_path
     ) -> None:
         """summarize_transcript should save the result when save=True."""
@@ -172,11 +178,11 @@ class TestSummarizationIntegration:
         except SummarizationError:
             pytest.skip("Azure OpenAI not configured")
 
-        from youtube_agent.tools.storage import TranscriptStorage
+        from youtube_agent.services.storage import TranscriptStorage
 
         storage = TranscriptStorage(storage_dir=tmp_path)
 
-        result = summarize_transcript(
+        result = await summarize_transcript(
             sample_transcript_result,
             save=True,
             storage=storage,
@@ -188,7 +194,7 @@ class TestSummarizationIntegration:
         assert result.summary is not None
         assert len(result.summary) > 50
 
-    def test_summarize_transcript_without_saving(
+    async def test_summarize_transcript_without_saving(
         self, sample_transcript_result: TranscriptResult, tmp_path
     ) -> None:
         """summarize_transcript should not save when save=False."""
@@ -197,11 +203,11 @@ class TestSummarizationIntegration:
         except SummarizationError:
             pytest.skip("Azure OpenAI not configured")
 
-        from youtube_agent.tools.storage import TranscriptStorage
+        from youtube_agent.services.storage import TranscriptStorage
 
         storage = TranscriptStorage(storage_dir=tmp_path)
 
-        result = summarize_transcript(
+        result = await summarize_transcript(
             sample_transcript_result,
             save=False,
             storage=storage,
@@ -215,22 +221,20 @@ class TestSummarizationIntegration:
 
 
 class TestMockedSummarization:
-    """Tests using a mock client to verify behavior without API calls."""
+    """Tests using a mock client to verify behavior without API calls (async)."""
 
-    def test_summarize_passes_correct_messages_to_client(
+    async def test_summarize_passes_correct_messages_to_client(
         self, sample_transcript_result: TranscriptResult
     ) -> None:
         """Should format messages correctly for the Azure OpenAI client."""
-        from unittest.mock import MagicMock
-
         from youtube_agent.models.config import Settings
 
-        # Create mock client
+        # Create mock async client
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "This is a test summary."
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         # Create settings that appear configured
         settings = Settings(
@@ -240,7 +244,7 @@ class TestMockedSummarization:
         )
 
         summarizer = TranscriptSummarizer(settings=settings, client=mock_client)
-        summary = summarizer.summarize_result(sample_transcript_result)
+        summary = await summarizer.summarize_result(sample_transcript_result)
 
         # Verify the client was called correctly
         mock_client.chat.completions.create.assert_called_once()
@@ -256,14 +260,14 @@ class TestMockedSummarization:
 
         assert summary == "This is a test summary."
 
-    def test_summarize_handles_api_errors(self, sample_transcript_result: TranscriptResult) -> None:
+    async def test_summarize_handles_api_errors(
+        self, sample_transcript_result: TranscriptResult
+    ) -> None:
         """Should wrap API errors in SummarizationError."""
-        from unittest.mock import MagicMock
-
         from youtube_agent.models.config import Settings
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = Exception("API Error")
+        mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
 
         settings = Settings(
             azure_openai_endpoint="https://test.openai.azure.com",
@@ -274,4 +278,4 @@ class TestMockedSummarization:
         summarizer = TranscriptSummarizer(settings=settings, client=mock_client)
 
         with pytest.raises(SummarizationError, match="API Error"):
-            summarizer.summarize_result(sample_transcript_result)
+            await summarizer.summarize_result(sample_transcript_result)

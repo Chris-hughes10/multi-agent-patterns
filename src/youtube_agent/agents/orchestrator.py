@@ -1,10 +1,8 @@
 """Orchestrator Agent - coordinates all sub-agents."""
 
-import asyncio
-import concurrent.futures
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Annotated, Any
+from collections.abc import Callable
+from typing import Annotated
 
 from agent_framework import ChatAgent
 from agent_framework._threads import AgentThread
@@ -109,22 +107,7 @@ class OrchestratorAgent:
             self._agents[name] = self._agent_factories[name]()
         return self._agents[name]
 
-    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
-        """Run an async coroutine synchronously.
-
-        Handles the case where we're already in an event loop.
-        """
-        try:
-            asyncio.get_running_loop()
-            # We're in an async context, need to use a new thread
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(coro)
-
-    def _delegate(self, agent_name: str, request: str) -> str:
+    async def _delegate(self, agent_name: str, request: str) -> str:
         """Delegate a request to a sub-agent.
 
         :param agent_name: Name of the agent to delegate to
@@ -133,23 +116,20 @@ class OrchestratorAgent:
         """
         logger.debug("%sAgent called with: %s", agent_name.title(), request)
         agent = self._get_agent(agent_name)
-
-        async def _run() -> str:
-            result = await agent.run(request)
-            logger.debug(
-                "%sAgent response: %s",
-                agent_name.title(),
-                result.text[:200] if result.text else "empty",
-            )
-            return result.text
-
-        return self._run_sync(_run())
+        result = await agent.run(request)
+        logger.debug(
+            "%sAgent response: %s",
+            agent_name.title(),
+            result.text[:200] if result.text else "empty",
+        )
+        return result.text
 
     # Tool wrappers with proper type annotations for LLM visibility
     # These thin wrappers provide the docstrings and Field descriptions
     # that the LLM needs to understand how to use each agent.
+    # All tools are async to enable parallel execution on the same event loop.
 
-    def ask_search_agent(
+    async def ask_search_agent(
         self,
         request: Annotated[str, Field(description="Request for the Search Agent")],
     ) -> str:
@@ -160,9 +140,9 @@ class OrchestratorAgent:
         :param request: What to search for (e.g., "Find videos about RAG best practices")
         :return: Search results from the agent
         """
-        return self._delegate("search", request)
+        return await self._delegate("search", request)
 
-    def ask_transcript_agent(
+    async def ask_transcript_agent(
         self,
         request: Annotated[str, Field(description="Request for the Transcript Agent")],
     ) -> str:
@@ -173,9 +153,9 @@ class OrchestratorAgent:
         :param request: What to do (e.g., "Fetch transcript for video dQw4w9WgXcQ")
         :return: Response from the transcript agent
         """
-        return self._delegate("transcript", request)
+        return await self._delegate("transcript", request)
 
-    def ask_summarize_agent(
+    async def ask_summarize_agent(
         self,
         request: Annotated[str, Field(description="Request for the Summarize Agent")],
     ) -> str:
@@ -186,9 +166,9 @@ class OrchestratorAgent:
         :param request: What to summarize (e.g., "Summarize video dQw4w9WgXcQ")
         :return: Summary from the agent
         """
-        return self._delegate("summarize", request)
+        return await self._delegate("summarize", request)
 
-    def ask_writer_agent(
+    async def ask_writer_agent(
         self,
         request: Annotated[str, Field(description="Request for the Writer Agent")],
     ) -> str:
@@ -199,7 +179,7 @@ class OrchestratorAgent:
         :param request: What to write (e.g., "Write the summary to research-notes.md")
         :return: Confirmation from the writer agent
         """
-        return self._delegate("writer", request)
+        return await self._delegate("writer", request)
 
     def get_orchestrator(self) -> ChatAgent:
         """Get the orchestrator ChatAgent.
