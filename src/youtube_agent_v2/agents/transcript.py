@@ -1,15 +1,19 @@
 """TranscriptAgent - YouTube transcript fetching and storage specialist."""
 
+import asyncio
+import re
 from collections.abc import Callable
 from typing import Any
 
+from youtube_agent.services.storage import TranscriptStorage
+from youtube_agent.services.youtube import extract_video_id, fetch_transcript
 from youtube_agent.tools.transcript import (
     fetch_video_transcript,
     list_stored_transcripts,
     lookup_stored_transcript,
     store_video_transcript,
 )
-from youtube_agent_v2.core import BaseAgent, Task, TaskResult
+from youtube_agent_v2.core import BaseAgent, Task, TaskResult, TaskStatus
 
 TRANSCRIPT_INSTRUCTIONS = """You are a Transcript Agent. Your job is to fetch and manage YouTube video transcripts.
 
@@ -32,8 +36,8 @@ class TranscriptAgent(BaseAgent):
 
     Capabilities: transcript_fetch, transcript_storage
 
-    Uses transcript tools from V1 to fetch, store, and retrieve
-    video transcripts with automatic caching.
+    Uses transcript services directly for DAG execution,
+    returning structured data that can be used for variable resolution.
     """
 
     @property
@@ -60,28 +64,82 @@ class TranscriptAgent(BaseAgent):
         ]
 
     async def execute(self, task: Task) -> TaskResult:
-        """Execute transcript task with optional auto-summarization.
+        """Execute transcript task and return structured results.
 
-        If task.context contains 'auto_summarize': True, spawns a
-        sub-task for the SummarizeAgent after fetching the transcript.
+        Overrides base execute() to return structured data suitable
+        for DAG variable resolution (e.g., $transcript_1.text).
 
         :param task: Task to execute
-        :return: TaskResult with transcript data
+        :return: TaskResult with structured transcript data
         """
-        # Execute the base transcript operation
-        result = await super().execute(task)
+        task.status = TaskStatus.RUNNING
 
-        # Check if we should spawn a summarization sub-task
-        if result.success and task.context.get("auto_summarize"):
-            # Extract video_id from context or try to parse from result
-            video_id = task.context.get("video_id")
-            if video_id:
-                summary_task = self.create_subtask(
-                    parent_task=task,
-                    description=f"Summarize the transcript for video {video_id}",
-                    required_capabilities=["summarization"],
-                    additional_context={"video_id": video_id},
-                )
-                await self.submit_task_async(summary_task)
+        try:
+            # Extract video_id from task
+            video_id = self._extract_video_id(task)
 
-        return result
+            # Check storage first
+            storage = TranscriptStorage()
+            stored = await asyncio.to_thread(storage.load, video_id)
+
+            if stored:
+                # Return cached transcript
+                output = {
+                    "video_id": video_id,
+                    "title": stored.metadata.title or "Unknown",
+                    "text": stored.transcript.full_text,
+                    "cached": True,
+                }
+            else:
+                # Fetch from YouTube
+                result = await fetch_transcript(video_id)
+
+                # Save to storage
+                await asyncio.to_thread(storage.save, result)
+
+                output = {
+                    "video_id": video_id,
+                    "title": result.metadata.title or "Unknown",
+                    "text": result.transcript.full_text,
+                    "cached": False,
+                }
+
+            task.status = TaskStatus.COMPLETED
+            return TaskResult(success=True, data=output)
+
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            return TaskResult(success=False, error=str(e))
+
+    def _extract_video_id(self, task: Task) -> str:
+        """Extract video ID from task description or context.
+
+        :param task: The task to extract video ID from
+        :return: Video ID string
+        :raises ValueError: If no video ID can be extracted
+        """
+        # Check context first
+        if "video_id" in task.context:
+            return extract_video_id(task.context["video_id"])
+
+        # Try to extract from description using patterns
+        desc = task.description
+
+        # Look for video ID pattern (11 alphanumeric chars)
+        video_id_pattern = r"\b([a-zA-Z0-9_-]{11})\b"
+        matches = re.findall(video_id_pattern, desc)
+        if matches:
+            # Return the first valid-looking video ID
+            for match in matches:
+                try:
+                    return extract_video_id(match)
+                except ValueError:
+                    continue
+
+        # Try to extract from URL in description
+        url_pattern = r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})"
+        match = re.search(url_pattern, desc)
+        if match:
+            return match.group(1)
+
+        raise ValueError(f"Could not extract video ID from task: {task.description[:100]}")

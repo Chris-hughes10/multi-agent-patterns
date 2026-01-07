@@ -46,35 +46,45 @@ that will accomplish the goal. Each step is executed by a specific agent.
 
 {agent_catalog}
 
+**CRITICAL**: You can ONLY use the agents listed above. The valid agent names are:
+{agent_names}
+
+Do NOT invent new agents. Every step's "agent" field MUST be one of the names listed above.
+
 ## Planning Rules
 
 1. **Identify the goal**: What does the user ultimately want?
-2. **Break down into steps**: What individual tasks are needed?
-3. **Assign agents**: Which agent is best suited for each task?
+2. **Break down into steps**: What tasks can the available agents perform?
+3. **Assign agents**: Each step MUST use an agent from the list above
 4. **Define dependencies**: Which steps must complete before others can start?
-5. **Enable parallelism**: Steps without dependencies can run in parallel
+5. **Keep it simple**: Use the minimum number of steps needed. Complex analysis should be done by the "summarize" agent.
+
+## What Each Agent Does
+
+- **search**: Searches YouTube for videos. Input: {{"query": "search terms"}}. Output: {{"results": [{{"video_id": "...", "title": "...", "channel": "..."}}]}}
+- **transcript**: Fetches transcript for a video. Input: {{"video_id": "..."}}. Output: {{"text": "...", "title": "..."}}
+- **summarize**: Analyzes/summarizes text. Input: {{"text": "...", "title": "..."}}. Output: {{"summary": "..."}}. Use this for ANY analysis, extraction, or synthesis task.
+- **writer**: Writes content to a file. Input: {{"content": "...", "filename": "..."}}
 
 ## Variable References
 
 Steps can reference outputs from previous steps using `$step_id` syntax:
-- `$search` - entire output of the "search" step
-- `$search.results` - the "results" field from search output
-- `$search.results[0]` - first item in results array
-- `$search.results[0].video_id` - video_id from first result
+- `$search.results[0].video_id` - video_id from first search result
+- `$transcript_1.text` - transcript text from transcript_1 step
+- `$summarize_1.summary` - summary from summarize_1 step
 
 ## Output Format
 
-Respond with a JSON object containing the execution plan:
+Respond with ONLY a valid JSON object (no markdown, no explanation):
 
-```json
 {{
   "goal": "Brief summary of the user's goal",
   "steps": [
     {{
       "id": "search",
       "agent": "search",
-      "description": "Search for videos about X",
-      "input": {{"query": "search terms"}},
+      "description": "Search for videos about cooking pork",
+      "input": {{"query": "pork loin kamado grill"}},
       "depends_on": []
     }},
     {{
@@ -85,23 +95,21 @@ Respond with a JSON object containing the execution plan:
       "depends_on": ["search"]
     }},
     {{
-      "id": "summarize",
+      "id": "analyze",
       "agent": "summarize",
-      "description": "Summarize the transcript",
-      "input": {{"text": "$transcript_1", "focus": ["key points"]}},
+      "description": "Extract cooking temperatures and times from transcript",
+      "input": {{"text": "$transcript_1.text", "title": "$transcript_1.title"}},
       "depends_on": ["transcript_1"]
     }}
   ]
 }}
-```
 
-## Important Notes
+## Important Constraints
 
-- Use descriptive step IDs (not just numbers)
-- Include clear descriptions for each step
-- Maximize parallelism by minimizing unnecessary dependencies
-- Only include steps that are actually needed
-- Reference previous step outputs using $ syntax
+- The "agent" field MUST be exactly one of: {agent_names}
+- Do NOT create steps for "select", "filter", "reconcile", "extract" - use "summarize" for all analysis
+- Keep plans simple: 3-6 steps maximum
+- Use descriptive step IDs that differ from the agent name
 """
 
 
@@ -171,7 +179,11 @@ class PlannerAgent:
         """Get or create the ChatAgent for planning."""
         if self._chat_agent is None:
             agent_catalog = _build_agent_catalog(self._registry)
-            instructions = PLANNER_SYSTEM_PROMPT.format(agent_catalog=agent_catalog)
+            agent_names = ", ".join(f'"{a.name}"' for a in self._registry.all_agents())
+            instructions = PLANNER_SYSTEM_PROMPT.format(
+                agent_catalog=agent_catalog,
+                agent_names=agent_names,
+            )
 
             self._chat_agent = ChatAgent(
                 chat_client=self._client,
@@ -255,7 +267,7 @@ Respond ONLY with a valid JSON object containing the plan."""
         :param response_text: Raw LLM response
         :param goal: The original goal (fallback if not in response)
         :return: ExecutionDAG
-        :raises ValueError: If response cannot be parsed
+        :raises ValueError: If response cannot be parsed or contains invalid agents
         """
         # Try to extract JSON from the response
         text = response_text.strip()
@@ -277,11 +289,21 @@ Respond ONLY with a valid JSON object containing the plan."""
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse planner response: {e}")
             logger.debug(f"Response text: {text}")
-            raise ValueError(f"Failed to parse planner response as JSON: {e}")
+            raise ValueError(f"Failed to parse planner response as JSON: {e}") from None
 
         # Validate required fields
         if "steps" not in data:
             raise ValueError("Planner response missing 'steps' field")
+
+        # Validate agent names before creating DAG
+        valid_agent_names = {a.name for a in self._registry.all_agents()}
+        for step in data["steps"]:
+            agent_name = step.get("agent", step.get("agent_name", ""))
+            if agent_name not in valid_agent_names:
+                raise ValueError(
+                    f"Invalid agent '{agent_name}' in step '{step.get('id', '?')}'. "
+                    f"Valid agents: {', '.join(sorted(valid_agent_names))}"
+                )
 
         # Use provided goal or extract from response
         dag_goal = data.get("goal", goal)
@@ -289,7 +311,7 @@ Respond ONLY with a valid JSON object containing the plan."""
         # Create DAG from parsed data
         dag = ExecutionDAG.from_dict({"goal": dag_goal, "steps": data["steps"]})
 
-        # Validate the DAG
+        # Validate the DAG structure
         errors = dag.validate()
         if errors:
             raise ValueError(f"Invalid DAG structure: {'; '.join(errors)}")

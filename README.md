@@ -189,6 +189,79 @@ The orchestrator coordinates four specialized agents:
 
 See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural decisions.
 
+## V2: Multi-Agent Patterns
+
+YouTube Agent V2 (`youtube-agent-v2`) explores alternative multi-agent coordination patterns beyond the V1 orchestrator.
+
+### Available Patterns
+
+```bash
+# View all patterns
+uv run youtube-agent-v2 patterns
+```
+
+| Pattern | Description | Best For |
+|---------|-------------|----------|
+| **dispatcher** | Central coordinator assigns tasks to capable agents | Simple single-task operations |
+| **self-selection** | Agents compete to claim tasks from a queue | Scalable systems, load balancing |
+| **planner** | LLM creates execution DAG, parallel execution with dependencies | Complex multi-step workflows |
+
+### Quick Start
+
+```bash
+# List registered agents
+uv run youtube-agent-v2 agents
+
+# Simple commands (default: dispatcher pattern)
+uv run youtube-agent-v2 search "python async tutorial"
+uv run youtube-agent-v2 transcript VIDEO_ID
+uv run youtube-agent-v2 summarize VIDEO_ID
+
+# Use a different pattern
+uv run youtube-agent-v2 -p planner search "kamado cooking tips"
+uv run youtube-agent-v2 -p self-selection search "machine learning"
+
+# Interactive chat
+uv run youtube-agent-v2 chat
+uv run youtube-agent-v2 -p planner chat
+
+# Single request (non-interactive)
+uv run youtube-agent-v2 -p planner chat -r "Find videos about grilling and summarize them"
+```
+
+### Pattern Details
+
+#### Dispatcher (default)
+Central coordinator pulls tasks from a queue and assigns them to the first capable agent. Good for controlled execution with simple selection logic.
+
+#### Self-Selection
+Agents autonomously watch the queue and compete to claim tasks they can handle. Provides natural load balancing and scales well with many agents.
+
+#### Planner (recommended for complex tasks)
+An LLM-powered Planner creates an execution DAG (Directed Acyclic Graph) upfront, then the DAGExecutor runs steps with:
+- **Parallel execution** of independent steps
+- **Dependency tracking** between steps
+- **Variable resolution** (`$step_id.field` syntax)
+- **Re-planning on failure** with partial results
+
+Example DAG for "Find videos about kamado cooking and summarize them":
+```
+search → transcript_1 → summarize_1 ─┐
+       → transcript_2 → summarize_2 ─┴→ final_synthesis
+```
+
+### V1 vs V2
+
+| Aspect | V1 Orchestrator | V2 Patterns |
+|--------|-----------------|-------------|
+| **Control** | LLM decides every step | Patterns define coordination |
+| **Best for** | Conversational, reasoning-heavy | Batch processing, parallel execution |
+| **Command** | `youtube-agent` | `youtube-agent-v2` |
+
+See [docs/V2_IMPLEMENTATION_PLAN.md](docs/V2_IMPLEMENTATION_PLAN.md) for detailed architecture documentation.
+
+---
+
 ## Development
 
 ```bash

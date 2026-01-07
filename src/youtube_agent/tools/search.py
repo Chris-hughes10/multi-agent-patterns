@@ -6,6 +6,7 @@ service to the LLM. Business logic is in services/youtube.py.
 All tool functions are async to avoid blocking the event loop.
 """
 
+import json
 from typing import Annotated
 
 from pydantic import Field
@@ -14,7 +15,12 @@ from pydantic import Field
 from youtube_agent.models.search import VideoSearchResult
 from youtube_agent.services.youtube import YouTubeSearchError, search_youtube
 
-__all__ = ["VideoSearchResult", "YouTubeSearchError", "search_youtube_formatted"]
+__all__ = [
+    "VideoSearchResult",
+    "YouTubeSearchError",
+    "search_youtube_formatted",
+    "search_youtube_structured",
+]
 
 
 async def search_youtube_formatted(
@@ -46,3 +52,37 @@ async def search_youtube_formatted(
         lines.append("")
 
     return "\n".join(lines)
+
+
+async def search_youtube_structured(
+    query: Annotated[str, Field(description="Search query for YouTube videos")],
+    max_results: Annotated[int, Field(description="Maximum number of results to return")] = 5,
+) -> str:
+    """Search YouTube and return structured JSON results.
+
+    Returns a JSON string with structured data that can be used for
+    DAG variable resolution (e.g., $search.results[0].video_id).
+
+    :param query: Search query string
+    :param max_results: Maximum number of results (default 5)
+    :return: JSON string with query and results array
+    """
+    results = await search_youtube(query, max_results)
+
+    output = {
+        "query": query,
+        "count": len(results),
+        "results": [
+            {
+                "video_id": video.video_id,
+                "title": video.title,
+                "channel": video.channel,
+                "duration": video.duration,
+                "view_count": video.view_count,
+                "published_time": video.published_time,
+            }
+            for video in results
+        ],
+    }
+
+    return json.dumps(output, indent=2)

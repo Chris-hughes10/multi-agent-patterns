@@ -1359,6 +1359,55 @@ tests/
 
 **Total Tests: 73 V2 tests passing**
 
+#### Bug Fixes: Structured Data for DAG Variable Resolution
+
+The initial implementation had issues where DAG variable references like `$search.results[0].video_id` would fail because agents returned LLM text responses instead of structured data.
+
+**Problem:** When the planner created DAGs with variable references, the DAG executor couldn't resolve them because:
+1. `SearchAgent` returned formatted text strings instead of JSON with a `results` array
+2. `TranscriptAgent` returned LLM responses instead of `{"text": "...", "video_id": "..."}`
+3. `SummarizeAgent` returned LLM responses instead of `{"summary": "..."}`
+
+**Solution:** Override `execute()` in each agent to return structured dictionaries:
+
+```python
+# SearchAgent now returns:
+{"query": "...", "count": 5, "results": [{"video_id": "...", "title": "...", ...}]}
+
+# TranscriptAgent now returns:
+{"video_id": "...", "title": "...", "text": "...", "cached": bool}
+
+# SummarizeAgent now returns:
+{"video_id": "...", "title": "...", "summary": "...", "cached": bool}
+```
+
+**Files modified:**
+- `src/youtube_agent_v2/agents/search.py` - Direct service call, structured output
+- `src/youtube_agent_v2/agents/transcript.py` - Direct service call, structured output
+- `src/youtube_agent_v2/agents/summarize.py` - Direct service call, structured output
+- `src/youtube_agent/tools/search.py` - Added `search_youtube_structured()` tool
+
+#### Bug Fixes: Planner Agent Name Validation
+
+The planner LLM would sometimes create plans with invented agent names like `"select_top_videos"` or `"extract_key_parameters"` that don't correspond to actual agents.
+
+**Solution:**
+1. Updated planner prompt to explicitly list valid agent names and emphasize constraints
+2. Added validation in `_parse_dag_response()` to reject plans with invalid agent names
+3. Clarified that `"summarize"` agent should be used for ANY analysis/extraction task
+
+```python
+# Validation in planner.py
+valid_agent_names = {a.name for a in self._registry.all_agents()}
+for step in data["steps"]:
+    agent_name = step.get("agent", step.get("agent_name", ""))
+    if agent_name not in valid_agent_names:
+        raise ValueError(
+            f"Invalid agent '{agent_name}' in step '{step.get('id', '?')}'. "
+            f"Valid agents: {', '.join(sorted(valid_agent_names))}"
+        )
+```
+
 ---
 
 ### Example: End-to-End Flow
