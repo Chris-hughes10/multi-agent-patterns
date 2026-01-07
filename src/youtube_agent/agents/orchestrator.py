@@ -1,18 +1,21 @@
 """Orchestrator Agent - coordinates all sub-agents."""
 
 import asyncio
+import concurrent.futures
 import logging
-from typing import Annotated
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any
 
 from agent_framework import ChatAgent
 from agent_framework._threads import AgentThread
 from pydantic import Field
 
-from youtube_agent.agents.client import get_chat_client
-from youtube_agent.agents.context import TranscriptContextProvider
 from youtube_agent.agents.search_agent import create_search_agent
 from youtube_agent.agents.summarize_agent import create_summarize_agent
 from youtube_agent.agents.transcript_agent import create_transcript_agent
+from youtube_agent.agents.writer_agent import create_writer_agent
+from youtube_agent.infra.client import get_chat_client
+from youtube_agent.infra.context import TranscriptContextProvider
 
 logger = logging.getLogger("youtube_agent.orchestrator")
 
@@ -22,6 +25,7 @@ Your available agents:
 1. **SearchAgent** - Searches YouTube for videos on a topic
 2. **TranscriptAgent** - Fetches, stores, and retrieves video transcripts (the ONLY agent that fetches from YouTube)
 3. **SummarizeAgent** - Summarizes text or stored transcripts (does NOT fetch)
+4. **WriterAgent** - Exports content to markdown files (for saving summaries, research notes, etc.)
 
 ## Memory: Available Transcripts
 You have access to a memory section called "Available Transcripts" that shows all stored transcripts.
@@ -56,13 +60,19 @@ The SummarizeAgent cannot fetch transcripts itself. Always:
 1. Get transcript text via TranscriptAgent first
 2. Pass that text to SummarizeAgent
 
+**For "save this to a file" or "export the summary":**
+→ Use WriterAgent to write content to a markdown file
+→ Provide clear, well-formatted markdown content
+→ Suggest appropriate filenames based on the content
+
 ## Response guidelines:
 - CHECK YOUR MEMORY for stored transcripts before doing new searches
 - TranscriptAgent automatically uses cached transcripts when available
 - Decide the output format based on user intent (detailed vs concise)
 - For research queries, synthesize insights from multiple videos
 - Always cite which videos information came from
-- If a step fails, explain what happened and continue with available data"""
+- If a step fails, explain what happened and continue with available data
+- When asked to save/export content, use WriterAgent with well-formatted markdown"""
 
 
 class OrchestratorAgent:
@@ -78,32 +88,28 @@ class OrchestratorAgent:
 
     def __init__(self) -> None:
         """Initialize the orchestrator with sub-agents."""
-        self._search_agent: ChatAgent | None = None
-        self._transcript_agent: ChatAgent | None = None
-        self._summarize_agent: ChatAgent | None = None
+        self._agents: dict[str, ChatAgent] = {}
         self._orchestrator: ChatAgent | None = None
         self._thread: AgentThread | None = None
         self._context_provider: TranscriptContextProvider | None = None
 
-    def _get_search_agent(self) -> ChatAgent:
-        """Lazy initialization of search agent."""
-        if self._search_agent is None:
-            self._search_agent = create_search_agent()
-        return self._search_agent
+        # Agent factory registry
+        self._agent_factories: dict[str, Callable[[], ChatAgent]] = {
+            "search": create_search_agent,
+            "transcript": create_transcript_agent,
+            "summarize": create_summarize_agent,
+            "writer": create_writer_agent,
+        }
 
-    def _get_transcript_agent(self) -> ChatAgent:
-        """Lazy initialization of transcript agent."""
-        if self._transcript_agent is None:
-            self._transcript_agent = create_transcript_agent()
-        return self._transcript_agent
+    def _get_agent(self, name: str) -> ChatAgent:
+        """Get or create an agent by name (lazy initialization)."""
+        if name not in self._agents:
+            if name not in self._agent_factories:
+                raise ValueError(f"Unknown agent: {name}")
+            self._agents[name] = self._agent_factories[name]()
+        return self._agents[name]
 
-    def _get_summarize_agent(self) -> ChatAgent:
-        """Lazy initialization of summarize agent."""
-        if self._summarize_agent is None:
-            self._summarize_agent = create_summarize_agent()
-        return self._summarize_agent
-
-    def _run_sync(self, coro: asyncio.coroutines) -> str:
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run an async coroutine synchronously.
 
         Handles the case where we're already in an event loop.
@@ -111,14 +117,37 @@ class OrchestratorAgent:
         try:
             asyncio.get_running_loop()
             # We're in an async context, need to use a new thread
-            import concurrent.futures
-
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, coro)
                 return future.result()
         except RuntimeError:
             # No running loop, safe to use asyncio.run
             return asyncio.run(coro)
+
+    def _delegate(self, agent_name: str, request: str) -> str:
+        """Delegate a request to a sub-agent.
+
+        :param agent_name: Name of the agent to delegate to
+        :param request: The request to send to the agent
+        :return: The agent's response
+        """
+        logger.debug("%sAgent called with: %s", agent_name.title(), request)
+        agent = self._get_agent(agent_name)
+
+        async def _run() -> str:
+            result = await agent.run(request)
+            logger.debug(
+                "%sAgent response: %s",
+                agent_name.title(),
+                result.text[:200] if result.text else "empty",
+            )
+            return result.text
+
+        return self._run_sync(_run())
+
+    # Tool wrappers with proper type annotations for LLM visibility
+    # These thin wrappers provide the docstrings and Field descriptions
+    # that the LLM needs to understand how to use each agent.
 
     def ask_search_agent(
         self,
@@ -131,15 +160,7 @@ class OrchestratorAgent:
         :param request: What to search for (e.g., "Find videos about RAG best practices")
         :return: Search results from the agent
         """
-        logger.debug("SearchAgent called with: %s", request)
-        agent = self._get_search_agent()
-
-        async def _run() -> str:
-            result = await agent.run(request)
-            logger.debug("SearchAgent response: %s", result.text[:200] if result.text else "empty")
-            return result.text
-
-        return self._run_sync(_run())
+        return self._delegate("search", request)
 
     def ask_transcript_agent(
         self,
@@ -152,17 +173,7 @@ class OrchestratorAgent:
         :param request: What to do (e.g., "Fetch transcript for video dQw4w9WgXcQ")
         :return: Response from the transcript agent
         """
-        logger.debug("TranscriptAgent called with: %s", request)
-        agent = self._get_transcript_agent()
-
-        async def _run() -> str:
-            result = await agent.run(request)
-            logger.debug(
-                "TranscriptAgent response: %s", result.text[:200] if result.text else "empty"
-            )
-            return result.text
-
-        return self._run_sync(_run())
+        return self._delegate("transcript", request)
 
     def ask_summarize_agent(
         self,
@@ -175,17 +186,20 @@ class OrchestratorAgent:
         :param request: What to summarize (e.g., "Summarize video dQw4w9WgXcQ")
         :return: Summary from the agent
         """
-        logger.debug("SummarizeAgent called with: %s", request)
-        agent = self._get_summarize_agent()
+        return self._delegate("summarize", request)
 
-        async def _run() -> str:
-            result = await agent.run(request)
-            logger.debug(
-                "SummarizeAgent response: %s", result.text[:200] if result.text else "empty"
-            )
-            return result.text
+    def ask_writer_agent(
+        self,
+        request: Annotated[str, Field(description="Request for the Writer Agent")],
+    ) -> str:
+        """Delegate a file writing request to the Writer Agent.
 
-        return self._run_sync(_run())
+        Use this to export content to markdown files.
+
+        :param request: What to write (e.g., "Write the summary to research-notes.md")
+        :return: Confirmation from the writer agent
+        """
+        return self._delegate("writer", request)
 
     def get_orchestrator(self) -> ChatAgent:
         """Get the orchestrator ChatAgent.
@@ -202,6 +216,7 @@ class OrchestratorAgent:
                     self.ask_search_agent,
                     self.ask_transcript_agent,
                     self.ask_summarize_agent,
+                    self.ask_writer_agent,
                 ],
             )
         return self._orchestrator

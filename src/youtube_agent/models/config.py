@@ -79,6 +79,18 @@ class Settings(BaseSettings):
         description="SOCKS5 or HTTP proxy URL (e.g., socks5://user:pass@host:port)",
     )
 
+    # LLM sampling settings
+    llm_temperature: float = Field(
+        default=0.7,
+        description="Temperature for LLM sampling (0=deterministic, 1=creative)",
+        ge=0.0,
+        le=2.0,
+    )
+    llm_seed: int | None = Field(
+        default=42,
+        description="Seed for reproducible LLM outputs (None for random)",
+    )
+
     @property
     def is_configured(self) -> bool:
         """Check if Azure OpenAI is properly configured.

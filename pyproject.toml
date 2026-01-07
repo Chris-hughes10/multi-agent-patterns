@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-youtube-agent = "youtube_agent.agents.main:main"
+youtube-agent = "youtube_agent.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

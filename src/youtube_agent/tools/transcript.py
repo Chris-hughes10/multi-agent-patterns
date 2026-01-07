@@ -1,183 +1,137 @@
-"""Tool for fetching YouTube video transcripts."""
+"""Transcript tools - LLM-callable wrappers.
 
-import re
-from typing import Protocol
+This module contains tool functions for transcript operations.
+Business logic is in services/youtube.py and services/storage.py.
+"""
 
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    NoTranscriptFound,
-    TranscriptsDisabled,
-    VideoUnavailable,
+import logging
+from typing import Annotated
+
+from pydantic import Field
+
+from youtube_agent.models.config import get_runtime_config
+from youtube_agent.services.storage import TranscriptStorage
+from youtube_agent.services.youtube import (
+    TranscriptFetcher,
+    TranscriptFetchError,
+    YouTubeTranscriptFetcher,
+    extract_video_id,
+    fetch_transcript,
 )
-from youtube_transcript_api.proxies import GenericProxyConfig
 
-from youtube_agent.models.config import get_settings
-from youtube_agent.models.transcript import (
-    Transcript,
-    TranscriptResult,
-    TranscriptSegment,
-    VideoMetadata,
-)
+__all__ = [
+    "TranscriptFetchError",
+    "TranscriptFetcher",
+    "YouTubeTranscriptFetcher",
+    "extract_video_id",
+    "fetch_transcript",
+    "fetch_video_transcript",
+    "store_video_transcript",
+    "lookup_stored_transcript",
+    "list_stored_transcripts",
+]
+
+logger = logging.getLogger("youtube_agent.tools.transcript")
 
 
-class TranscriptFetchError(Exception):
-    """Raised when a transcript cannot be fetched.
+def fetch_video_transcript(
+    video_url_or_id: Annotated[
+        str, Field(description="YouTube video URL or video ID to fetch transcript for")
+    ],
+) -> str:
+    """Fetch transcript from a YouTube video, using cached version if available.
 
-    :param video_id: The video ID that failed
-    :param reason: Human-readable reason for the failure
+    Checks storage first to avoid re-fetching. If not cached, fetches from
+    YouTube and optionally saves to storage.
+
+    :param video_url_or_id: YouTube URL or video ID
+    :return: The full transcript text
     """
+    try:
+        storage = TranscriptStorage()
 
-    def __init__(self, video_id: str, reason: str) -> None:
-        self.video_id = video_id
-        self.reason = reason
-        super().__init__(f"Failed to fetch transcript for {video_id}: {reason}")
+        # Extract video ID to check storage
+        video_id = extract_video_id(video_url_or_id)
+
+        # Check if we already have this transcript
+        stored = storage.load(video_id)
+        if stored:
+            logger.debug("Cache hit for video %s: %s", video_id, stored.metadata.title)
+            return f"Transcript for '{stored.metadata.title}' (from cache):\n\n{stored.transcript.full_text}"
+
+        # Not cached, fetch from YouTube
+        logger.debug("Cache miss for video %s, fetching from YouTube", video_id)
+        result = fetch_transcript(video_url_or_id)
+
+        # Save if auto-store is enabled
+        config = get_runtime_config()
+        if config.auto_store_transcripts:
+            storage.save(result)
+
+        return f"Transcript for '{result.metadata.title}':\n\n{result.transcript.full_text}"
+    except Exception as e:
+        return f"Error fetching transcript: {e}"
 
 
-class TranscriptFetcher(Protocol):
-    """Protocol for transcript fetching implementations.
+def store_video_transcript(
+    video_url_or_id: Annotated[
+        str, Field(description="YouTube video URL or video ID to fetch and store")
+    ],
+) -> str:
+    """Fetch and store a transcript for later retrieval.
 
-    Allows for dependency injection and testing.
+    :param video_url_or_id: YouTube URL or video ID
+    :return: Confirmation message with video ID
     """
-
-    def fetch(self, video_id: str, languages: list[str] | None = None) -> Transcript:
-        """Fetch transcript for a video.
-
-        :param video_id: YouTube video ID
-        :param languages: Preferred languages in order of preference
-        :return: The fetched transcript
-        :raises TranscriptFetchError: If transcript cannot be fetched
-        """
-        ...
+    try:
+        storage = TranscriptStorage()
+        result = fetch_transcript(video_url_or_id)
+        stored = storage.save(result)
+        return f"Stored transcript for '{stored.metadata.title}' (ID: {stored.video_id})"
+    except Exception as e:
+        return f"Error storing transcript: {e}"
 
 
-class YouTubeTranscriptFetcher:
-    """Fetches transcripts from YouTube using youtube-transcript-api.
+def lookup_stored_transcript(
+    video_id: Annotated[str, Field(description="Video ID to look up in storage")],
+) -> str:
+    """Look up a previously stored transcript.
 
-    :param proxy_url: Optional proxy URL (e.g., http://user:pass@host:port)
+    :param video_id: The video ID to look up
+    :return: The stored transcript or not found message
     """
+    storage = TranscriptStorage()
+    stored = storage.load(video_id)
+    if stored is None:
+        return f"No stored transcript found for video ID: {video_id}"
 
-    def __init__(self, proxy_url: str | None = None) -> None:
-        self._proxy_url = proxy_url
-
-    def _create_api(self) -> YouTubeTranscriptApi:
-        """Create YouTubeTranscriptApi instance with optional proxy."""
-        if self._proxy_url:
-            proxy_config = GenericProxyConfig(https_url=self._proxy_url)
-            return YouTubeTranscriptApi(proxy_config=proxy_config)
-        return YouTubeTranscriptApi()
-
-    def fetch(
-        self,
-        video_id: str,
-        languages: list[str] | None = None,
-    ) -> Transcript:
-        """Fetch transcript for a YouTube video.
-
-        :param video_id: YouTube video ID (e.g., 'dQw4w9WgXcQ')
-        :param languages: Preferred languages, defaults to ['en']
-        :return: Transcript object with segments and metadata
-        :raises TranscriptFetchError: If transcript is unavailable or disabled
-        """
-        languages = languages or ["en"]
-
-        try:
-            api = self._create_api()
-            fetched = api.fetch(video_id, languages=languages)
-            segments = [
-                TranscriptSegment(
-                    text=snippet.text,
-                    start=snippet.start,
-                    duration=snippet.duration,
-                )
-                for snippet in fetched
-            ]
-
-            return Transcript(
-                video_id=video_id,
-                segments=segments,
-                language=languages[0],
-                is_generated=False,
-            )
-
-        except TranscriptsDisabled:
-            raise TranscriptFetchError(
-                video_id, "Transcripts are disabled for this video"
-            ) from None
-        except NoTranscriptFound:
-            raise TranscriptFetchError(
-                video_id, f"No transcript found for languages: {languages}"
-            ) from None
-        except VideoUnavailable:
-            raise TranscriptFetchError(video_id, "Video is unavailable") from None
-        except Exception as e:
-            raise TranscriptFetchError(video_id, str(e)) from e
+    result = f"Stored transcript for '{stored.metadata.title}':\n"
+    result += f"Video ID: {stored.video_id}\n"
+    result += f"Stored at: {stored.stored_at}\n"
+    if stored.summary:
+        result += "Has summary: Yes\n"
+    result += f"\nTranscript:\n{stored.transcript.full_text}"
+    return result
 
 
-def extract_video_id(url_or_id: str) -> str:
-    """Extract video ID from a YouTube URL or return the ID if already provided.
+def list_stored_transcripts() -> str:
+    """List all stored transcript video IDs.
 
-    Supports various YouTube URL formats:
-    - https://www.youtube.com/watch?v=VIDEO_ID
-    - https://youtu.be/VIDEO_ID
-    - https://www.youtube.com/embed/VIDEO_ID
-    - VIDEO_ID (11 character ID)
-
-    :param url_or_id: YouTube URL or video ID
-    :return: The extracted video ID
-    :raises ValueError: If the URL/ID format is not recognized
+    :return: List of stored video IDs or empty message
     """
-    # Already a video ID (11 alphanumeric characters, hyphens, underscores)
-    if re.match(r"^[\w-]{11}$", url_or_id):
-        return url_or_id
+    storage = TranscriptStorage()
+    video_ids = storage.list_videos()
 
-    # Try to extract from URL
-    patterns = [
-        r"(?:youtube\.com/watch\?v=)([\w-]{11})",
-        r"(?:youtu\.be/)([\w-]{11})",
-        r"(?:youtube\.com/embed/)([\w-]{11})",
-        r"(?:youtube\.com/v/)([\w-]{11})",
-    ]
+    if not video_ids:
+        return "No transcripts stored yet."
 
-    for pattern in patterns:
-        match = re.search(pattern, url_or_id)
-        if match:
-            return match.group(1)
+    result = f"Stored transcripts ({len(video_ids)} total):\n"
+    for vid in video_ids:
+        stored = storage.load(vid)
+        if stored:
+            title = stored.metadata.title or "Unknown"
+            result += f"  - {vid}: {title}\n"
+        else:
+            result += f"  - {vid}\n"
 
-    raise ValueError(f"Could not extract video ID from: {url_or_id}")
-
-
-def fetch_transcript(
-    url_or_id: str,
-    languages: list[str] | None = None,
-    fetcher: TranscriptFetcher | None = None,
-) -> TranscriptResult:
-    """Fetch a transcript from YouTube - main entry point.
-
-    This is the primary function to use for fetching transcripts.
-    It handles URL parsing and returns a complete result with metadata.
-
-    Uses proxy from settings if configured (PROXY_URL environment variable).
-
-    :param url_or_id: YouTube URL or video ID
-    :param languages: Preferred languages, defaults to ['en']
-    :param fetcher: Optional custom fetcher for dependency injection
-    :return: TranscriptResult with transcript and metadata
-    :raises TranscriptFetchError: If transcript cannot be fetched
-    :raises ValueError: If video ID cannot be extracted from URL
-
-    Example::
-
-        result = fetch_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        print(result.transcript.full_text)
-    """
-    video_id = extract_video_id(url_or_id)
-
-    if fetcher is None:
-        settings = get_settings()
-        fetcher = YouTubeTranscriptFetcher(proxy_url=settings.proxy_url)
-
-    transcript = fetcher.fetch(video_id, languages)
-
-    metadata = VideoMetadata(video_id=video_id)
-
-    return TranscriptResult(metadata=metadata, transcript=transcript)
+    return result
