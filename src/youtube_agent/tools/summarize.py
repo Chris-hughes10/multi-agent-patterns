@@ -2,8 +2,11 @@
 
 This module contains tool functions for summarization operations.
 Business logic is in services/summarizer.py.
+
+All tool functions are async to avoid blocking the event loop.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -24,7 +27,7 @@ __all__ = [
 ]
 
 
-def summarize_stored_transcript(
+async def summarize_stored_transcript(
     video_id: Annotated[str, Field(description="Video ID of stored transcript to summarize")],
 ) -> str:
     """Summarize a previously stored transcript.
@@ -33,7 +36,7 @@ def summarize_stored_transcript(
     :return: The summary text
     """
     storage = TranscriptStorage()
-    stored = storage.load(video_id)
+    stored = await asyncio.to_thread(storage.load, video_id)
     if stored is None:
         return f"No stored transcript found for video ID: {video_id}"
 
@@ -42,7 +45,7 @@ def summarize_stored_transcript(
 
     try:
         summarizer = TranscriptSummarizer()
-        summary = summarizer.summarize(
+        summary = await summarizer.summarize(
             transcript_text=stored.transcript.full_text,
             video_title=stored.metadata.title,
         )
@@ -51,7 +54,7 @@ def summarize_stored_transcript(
         return f"Error summarizing stored transcript: {e}"
 
 
-def summarize_text(
+async def summarize_text(
     text: Annotated[str, Field(description="Text content to summarize")],
     context: Annotated[
         str | None, Field(description="Optional context about the text (e.g., video title)")
@@ -65,7 +68,7 @@ def summarize_text(
     """
     try:
         summarizer = TranscriptSummarizer()
-        summary = summarizer.summarize(
+        summary = await summarizer.summarize(
             transcript_text=text,
             video_title=context,
         )
@@ -74,7 +77,7 @@ def summarize_text(
         return f"Error summarizing text: {e}"
 
 
-def summarize_transcript(
+async def summarize_transcript(
     result: TranscriptResult,
     save: bool = True,
     storage: TranscriptStorage | None = None,
@@ -95,10 +98,10 @@ def summarize_transcript(
     summarizer = summarizer or TranscriptSummarizer()
     storage = storage or TranscriptStorage()
 
-    summary = summarizer.summarize_result(result)
+    summary = await summarizer.summarize_result(result)
 
     if save:
-        return storage.save(result, summary=summary)
+        return await asyncio.to_thread(storage.save, result, summary)
 
     # Return without persisting
     now = datetime.now(UTC)
@@ -112,7 +115,7 @@ def summarize_transcript(
     )
 
 
-def summarize_video(
+async def summarize_video(
     url_or_id: str,
     save: bool = True,
     languages: list[str] | None = None,
@@ -130,5 +133,5 @@ def summarize_video(
     """
     from youtube_agent.services.youtube import fetch_transcript
 
-    result = fetch_transcript(url_or_id, languages=languages)
-    return summarize_transcript(result, save=save)
+    result = await fetch_transcript(url_or_id, languages=languages)
+    return await summarize_transcript(result, save=save)

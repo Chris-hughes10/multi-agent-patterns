@@ -20,6 +20,8 @@ dependencies = [
     "func-to-script>=1.1.0",
     "azure-identity>=1.25.1",
     "pysocks>=1.7.1",
+    "httpx>=0.27.0",
+    "aiofiles>=24.1.0",
 ]
 
 [project.optional-dependencies]
