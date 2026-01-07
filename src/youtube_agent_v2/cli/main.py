@@ -34,6 +34,7 @@ class Pattern(str, Enum):
     DISPATCHER = "dispatcher"
     SELF_SELECTION = "self-selection"
     PLANNER = "planner"
+    AUTONOMOUS = "autonomous"
 
 
 # Global pattern setting (set by CLI group)
@@ -187,6 +188,46 @@ async def run_with_planner(
         )
 
 
+async def run_with_autonomous(
+    registry: AgentRegistry,
+    description: str,
+) -> TaskResult:
+    """Run a task using the autonomous pattern.
+
+    Agents receive the goal and accumulated state, reason about what
+    to do next, and hand off to each other until the goal is satisfied.
+
+    :param registry: Agent registry
+    :param description: Natural language task description
+    :return: TaskResult
+    """
+    click.echo("[Autonomous] Starting agent chain...")
+
+    synthesizer = SynthesizerAgent(registry=registry)
+
+    result = await synthesizer.process_request(
+        user_request=description,
+        pattern="autonomous",
+    )
+
+    # Show execution path
+    path_summary = synthesizer.session.get_path_summary()
+    if path_summary:
+        click.echo(f"[Path] {path_summary}")
+
+    if isinstance(result, PartialResult):
+        return TaskResult(
+            success=False,
+            error=result.error or "Autonomous execution failed",
+            data=result.partial_data,
+        )
+    elif isinstance(result, HandoffResult):
+        return TaskResult(success=True, data=result.result)
+    else:
+        # String response from synthesizer
+        return TaskResult(success=True, data=result)
+
+
 async def run_task(
     description: str,
     capabilities: list[str],
@@ -208,8 +249,10 @@ async def run_task(
         result = await run_with_dispatcher(registry, description, capabilities, context)
     elif _current_pattern == Pattern.SELF_SELECTION:
         result = await run_with_self_selection(registry, description, capabilities, context)
-    else:  # Pattern.PLANNER
+    elif _current_pattern == Pattern.PLANNER:
         result = await run_with_planner(registry, description)
+    else:  # Pattern.AUTONOMOUS
+        result = await run_with_autonomous(registry, description)
 
     if result.success:
         click.echo("\n" + "=" * 60)
@@ -226,17 +269,18 @@ async def run_task(
 @click.option(
     "-p",
     "--pattern",
-    type=click.Choice(["dispatcher", "self-selection", "planner"]),
+    type=click.Choice(["dispatcher", "self-selection", "planner", "autonomous"]),
     default="dispatcher",
     help="Multi-agent pattern to use (default: dispatcher)",
 )
 def cli(verbose: bool, pattern: str) -> None:
     """YouTube Agent V2 - Multi-agent task processing.
 
-    Supports three coordination patterns:
+    Supports four coordination patterns:
     - dispatcher: Central coordinator assigns tasks to agents
     - self-selection: Agents autonomously claim tasks from queue
     - planner: LLM creates execution DAG, then parallel execution
+    - autonomous: Agents reason about goals and hand off to each other
     """
     global _current_pattern  # noqa: PLW0603
 
@@ -338,6 +382,12 @@ def patterns() -> None:
     click.echo("    Supports parallel execution and re-planning on failure.")
     click.echo("    Good for: Complex multi-step workflows, inspectable plans")
 
+    click.echo("\n  autonomous:")
+    click.echo("    Agents receive the goal and accumulated state,")
+    click.echo("    reason about what to do next, and hand off to each other")
+    click.echo("    until the goal is satisfied. No central planning.")
+    click.echo("    Good for: Adaptive execution, emergent workflows")
+
     click.echo("\n" + "-" * 40)
     click.echo("Usage: youtube-agent-v2 -p <pattern> <command>")
 
@@ -415,10 +465,10 @@ def chat(request: str | None) -> None:
             async def cleanup() -> None:
                 await pool.shutdown(wait=True)
 
-        else:  # Pattern.PLANNER
+        elif _current_pattern == Pattern.PLANNER:
             synthesizer = SynthesizerAgent(registry=registry)
 
-            async def submit(desc: str, caps: list[str]) -> TaskResult:
+            async def submit(desc: str, _caps: list[str]) -> TaskResult:
                 click.echo("[Planning...] Creating execution plan", nl=False)
 
                 # Create planner and get the plan
@@ -448,6 +498,36 @@ def chat(request: str | None) -> None:
                 )
                 if isinstance(result, PartialResult):
                     return TaskResult(success=False, error=result.error, data=result.partial_data)
+                elif isinstance(result, HandoffResult):
+                    return TaskResult(success=True, data=result.result)
+                else:
+                    return TaskResult(success=True, data=result)
+
+            async def cleanup() -> None:
+                pass  # Synthesizer doesn't need cleanup
+
+        else:  # Pattern.AUTONOMOUS
+            synthesizer = SynthesizerAgent(registry=registry)
+
+            async def submit(desc: str, _caps: list[str]) -> TaskResult:
+                click.echo("[Autonomous] Starting agent chain...")
+
+                result = await synthesizer.process_request(
+                    user_request=desc,
+                    pattern="autonomous",
+                )
+
+                # Show execution path
+                path_summary = synthesizer.session.get_path_summary()
+                if path_summary:
+                    click.echo(f"[Path] {path_summary}")
+
+                if isinstance(result, PartialResult):
+                    return TaskResult(
+                        success=False,
+                        error=result.error,
+                        data=result.partial_data,
+                    )
                 elif isinstance(result, HandoffResult):
                     return TaskResult(success=True, data=result.result)
                 else:

@@ -121,8 +121,8 @@ On a scale of 0.0 to 1.0, how well can this agent handle this task?
 Respond with ONLY a number between 0.0 and 1.0, nothing else."""
 
         try:
-            response = await self._client.create(messages=[{"role": "user", "content": prompt}])
-            score_text = response.content.strip()
+            response = await self._client.get_response(prompt)
+            score_text = response.text.strip()
             return float(score_text)
         except (ValueError, AttributeError):
             # If we can't parse the response, return 0
@@ -146,23 +146,40 @@ class CapabilityIntentRouter(IntentRouter):
         self._fallback = fallback
         # Map common keywords to capabilities
         self._keyword_map: dict[str, list[str]] = {
-            # Search-related
+            # Search-related - explicit search terms
             "search": ["youtube_search", "search", "video_discovery"],
             "find": ["youtube_search", "search", "video_discovery"],
             "look for": ["youtube_search", "search"],
             "discover": ["youtube_search", "video_discovery"],
+            # Search-related - natural language phrases
+            "videos about": ["youtube_search", "video_discovery"],
+            "videos on": ["youtube_search", "video_discovery"],
+            "youtube": ["youtube_search", "video_discovery"],
+            "on youtube": ["youtube_search", "video_discovery"],
+            "from youtube": ["youtube_search", "video_discovery"],
+            "based on": ["youtube_search", "video_discovery"],
+            "info on": ["youtube_search", "video_discovery"],
+            "information about": ["youtube_search", "video_discovery"],
+            "how to": ["youtube_search", "video_discovery", "summarization"],
+            "techniques": ["youtube_search", "video_discovery"],
+            "tutorial": ["youtube_search", "video_discovery"],
+            "learn about": ["youtube_search", "video_discovery"],
+            "channels": ["youtube_search", "video_discovery"],
             # Transcript-related
             "transcript": ["transcript_fetch", "transcript", "transcript_storage"],
             "captions": ["transcript_fetch", "transcript"],
             "subtitles": ["transcript_fetch", "transcript"],
             "spoken words": ["transcript_fetch", "transcript"],
             "what was said": ["transcript_fetch", "transcript"],
+            "words from": ["transcript_fetch", "transcript"],
             # Summarization-related
             "summarize": ["summarization", "summarize", "text_analysis"],
             "summary": ["summarization", "summarize"],
             "key points": ["summarization", "text_analysis"],
             "main ideas": ["summarization", "text_analysis"],
             "analyze": ["summarization", "text_analysis"],
+            "extract": ["summarization", "text_analysis"],
+            "tell me about": ["summarization", "text_analysis"],
             # Writing-related
             "write": ["file_export", "markdown_writing", "write"],
             "export": ["file_export", "markdown_writing"],

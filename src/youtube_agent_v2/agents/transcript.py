@@ -14,6 +14,7 @@ from youtube_agent.tools.transcript import (
     store_video_transcript,
 )
 from youtube_agent_v2.core import BaseAgent, Task, TaskResult, TaskStatus
+from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
 
 TRANSCRIPT_INSTRUCTIONS = """You are a Transcript Agent. Your job is to fetch and manage YouTube video transcripts.
 
@@ -49,6 +50,14 @@ class TranscriptAgent(BaseAgent):
     def capabilities(self) -> list[str]:
         """Return transcript-related capabilities."""
         return ["transcript_fetch", "transcript_storage"]
+
+    @property
+    def description(self) -> str:
+        """Return description for intent routing."""
+        return (
+            "I fetch transcripts and captions from YouTube videos. "
+            "I get the spoken words but do not search or summarize."
+        )
 
     def _get_instructions(self) -> str:
         """Return transcript agent system prompt."""
@@ -110,6 +119,144 @@ class TranscriptAgent(BaseAgent):
         except Exception as e:
             task.status = TaskStatus.FAILED
             return TaskResult(success=False, error=str(e))
+
+    async def execute_autonomous(
+        self,
+        goal: str,
+        state: dict[str, Any],
+    ) -> HandoffResult | PartialResult:
+        """Fetch transcripts and reason about next steps.
+
+        TranscriptAgent typically receives videos from SearchAgent and
+        hands off to SummarizeAgent if summarization is needed.
+
+        :param goal: Original user request
+        :param state: Accumulated state from previous agents
+        :return: HandoffResult (complete or handoff) or PartialResult on error
+        """
+        # Get videos from state (from previous search) or extract video_id from goal
+        videos = state.get("videos", [])
+        video_id = state.get("video_id")
+
+        if not videos and not video_id:
+            # Try to extract video_id from goal
+            try:
+                video_id = self._extract_video_id_from_goal(goal)
+            except ValueError:
+                return PartialResult(
+                    error="No video ID found in state or goal",
+                    partial_data=state,
+                )
+
+        try:
+            storage = TranscriptStorage()
+            transcripts = []
+
+            if video_id:
+                # Single video
+                output = await self._fetch_single_transcript(storage, video_id)
+                transcripts.append(output)
+            else:
+                # Multiple videos from search - fetch first few
+                for video in videos[:3]:  # Limit to 3 for efficiency
+                    vid = video.get("video_id") or video
+                    if isinstance(vid, str):
+                        output = await self._fetch_single_transcript(storage, vid)
+                        transcripts.append(output)
+
+            transcript_data = {
+                "transcripts": transcripts,
+                "count": len(transcripts),
+            }
+
+            # Reason about what's needed next based on the goal
+            goal_lower = goal.lower()
+            needs_summary = any(
+                kw in goal_lower
+                for kw in [
+                    "summarize",
+                    "summary",
+                    "key points",
+                    "main ideas",
+                    "analyze",
+                    "extract",
+                    "temperature",
+                    "cooking",
+                    "how to",
+                    "instructions",
+                ]
+            )
+
+            if needs_summary:
+                return HandoffResult.handoff(
+                    intent="Summarize these transcripts focusing on the user's query",
+                    state={**state, "transcript": transcript_data},
+                )
+
+            # Goal is satisfied with just transcripts
+            return HandoffResult.complete(transcript_data)
+
+        except Exception as e:
+            return PartialResult(
+                error=f"Transcript fetch failed: {e}",
+                partial_data=state,
+            )
+
+    async def _fetch_single_transcript(
+        self,
+        storage: TranscriptStorage,
+        video_id: str,
+    ) -> dict[str, Any]:
+        """Fetch a single transcript and return structured data.
+
+        :param storage: TranscriptStorage instance
+        :param video_id: Video ID to fetch
+        :return: Structured transcript data
+        """
+        stored = await asyncio.to_thread(storage.load, video_id)
+
+        if stored:
+            return {
+                "video_id": video_id,
+                "title": stored.metadata.title or "Unknown",
+                "text": stored.transcript.full_text,
+                "cached": True,
+            }
+
+        result = await fetch_transcript(video_id)
+        await asyncio.to_thread(storage.save, result)
+
+        return {
+            "video_id": video_id,
+            "title": result.metadata.title or "Unknown",
+            "text": result.transcript.full_text,
+            "cached": False,
+        }
+
+    def _extract_video_id_from_goal(self, goal: str) -> str:
+        """Extract video ID from natural language goal.
+
+        :param goal: The user's goal
+        :return: Extracted video ID
+        :raises ValueError: If no video ID found
+        """
+        # Look for video ID pattern (11 alphanumeric chars)
+        video_id_pattern = r"\b([a-zA-Z0-9_-]{11})\b"
+        matches = re.findall(video_id_pattern, goal)
+        if matches:
+            for match in matches:
+                try:
+                    return extract_video_id(match)
+                except ValueError:
+                    continue
+
+        # Try to extract from URL in goal
+        url_pattern = r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})"
+        match = re.search(url_pattern, goal)
+        if match:
+            return match.group(1)
+
+        raise ValueError(f"Could not extract video ID from goal: {goal[:100]}")
 
     def _extract_video_id(self, task: Task) -> str:
         """Extract video ID from task description or context.

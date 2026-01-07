@@ -205,6 +205,7 @@ uv run youtube-agent-v2 patterns
 | **dispatcher** | Central coordinator assigns tasks to capable agents | Simple single-task operations |
 | **self-selection** | Agents compete to claim tasks from a queue | Scalable systems, load balancing |
 | **planner** | LLM creates execution DAG, parallel execution with dependencies | Complex multi-step workflows |
+| **autonomous** | Agents reason about goals and hand off to each other | Adaptive, emergent workflows |
 
 ### Quick Start
 
@@ -220,6 +221,7 @@ uv run youtube-agent-v2 summarize VIDEO_ID
 # Use a different pattern
 uv run youtube-agent-v2 -p planner search "kamado cooking tips"
 uv run youtube-agent-v2 -p self-selection search "machine learning"
+uv run youtube-agent-v2 -p autonomous chat -r "Find videos about cooking and summarize them"
 
 # Interactive chat
 uv run youtube-agent-v2 chat
@@ -249,6 +251,24 @@ Example DAG for "Find videos about kamado cooking and summarize them":
 search → transcript_1 → summarize_1 ─┐
        → transcript_2 → summarize_2 ─┴→ final_synthesis
 ```
+
+#### Autonomous
+Agents receive the original goal and accumulated state, then reason about what to do next. Each agent decides whether to complete the task or hand off to another agent based on what's still needed.
+
+```bash
+# Autonomous chain: search → transcript → summarize
+uv run youtube-agent-v2 -p autonomous chat -r "Find pork loin videos and summarize cooking temps"
+```
+
+The chain adapts based on the goal:
+- Goal mentions "transcript" → SearchAgent hands off to TranscriptAgent
+- Goal mentions "summarize" → TranscriptAgent hands off to SummarizeAgent
+- Goal mentions "save" or "file" → SummarizeAgent hands off to WriterAgent
+
+**Key differences from Planner:**
+- No upfront planning - agents decide dynamically
+- State accumulates as agents hand off
+- More flexible for evolving requirements
 
 ### V1 vs V2
 

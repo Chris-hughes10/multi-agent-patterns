@@ -4,9 +4,11 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from youtube_agent.infra.client import get_chat_client
 from youtube_agent.services.youtube import search_youtube
 from youtube_agent.tools.search import search_youtube_structured
 from youtube_agent_v2.core.base_agent import BaseAgent
+from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
 from youtube_agent_v2.core.models.task import Task, TaskResult, TaskStatus
 
 SEARCH_INSTRUCTIONS = """You are a YouTube Search Agent. Your job is to find relevant YouTube videos based on user queries.
@@ -39,6 +41,14 @@ class SearchAgent(BaseAgent):
     def capabilities(self) -> list[str]:
         """Return search-related capabilities."""
         return ["youtube_search", "video_discovery"]
+
+    @property
+    def description(self) -> str:
+        """Return description for intent routing."""
+        return (
+            "I search YouTube for videos matching queries. "
+            "I find videos but do not fetch transcripts or summarize content."
+        )
 
     def _get_instructions(self) -> str:
         """Return search agent system prompt."""
@@ -90,6 +100,111 @@ class SearchAgent(BaseAgent):
         except Exception as e:
             task.status = TaskStatus.FAILED
             return TaskResult(success=False, error=str(e))
+
+    async def execute_autonomous(
+        self,
+        goal: str,
+        state: dict[str, Any],
+    ) -> HandoffResult | PartialResult:
+        """Execute search and reason about next steps.
+
+        Search is typically the first step in a research chain. After
+        searching, we check if the goal requires transcripts or summarization.
+
+        :param goal: Original user request
+        :param state: Accumulated state from previous agents
+        :return: HandoffResult (complete or handoff) or PartialResult on error
+        """
+        # Extract query from state or goal
+        query = state.get("query")
+        if not query:
+            query = await self._extract_query_from_goal(goal)
+        max_results = state.get("max_results", 5)
+
+        try:
+            results = await search_youtube(query, max_results)
+
+            output = {
+                "query": query,
+                "count": len(results),
+                "results": [
+                    {
+                        "video_id": video.video_id,
+                        "title": video.title,
+                        "channel": video.channel,
+                        "duration": video.duration,
+                        "view_count": video.view_count,
+                        "published_time": video.published_time,
+                    }
+                    for video in results
+                ],
+            }
+
+            # Reason about what's needed next based on the goal
+            goal_lower = goal.lower()
+            needs_transcript = any(
+                kw in goal_lower
+                for kw in ["transcript", "text", "words", "said", "spoken", "captions"]
+            )
+            needs_summary = any(
+                kw in goal_lower
+                for kw in ["summarize", "summary", "key points", "main ideas", "analyze"]
+            )
+
+            if needs_transcript or needs_summary:
+                # Goal needs more than search - hand off
+                intent = "Get transcripts for these videos"
+                if needs_summary:
+                    intent += " and summarize them"
+
+                return HandoffResult.handoff(
+                    intent=intent,
+                    state={**state, "search": output, "videos": output["results"]},
+                )
+
+            # Goal is satisfied with just search results
+            return HandoffResult.complete(output)
+
+        except Exception as e:
+            return PartialResult(error=f"Search failed: {e}", partial_data=state)
+
+    async def _extract_query_from_goal(self, goal: str) -> str:
+        """Extract search query from natural language goal using LLM.
+
+        Uses a small LLM call to intelligently extract the core search
+        terms from a complex natural language request.
+
+        :param goal: The user's goal
+        :return: Extracted search query
+        """
+        prompt = f"""Extract a YouTube search query from this user request.
+
+User request: "{goal}"
+
+Rules:
+- Return ONLY the search query, nothing else
+- Keep it concise (under 10 words ideally)
+- Include the main topic and any specific details (equipment, channels, techniques)
+- Remove meta-instructions like "summarize", "get transcripts", "I need to know"
+
+Examples:
+- "I want to cook a pork loin on a Kamado" → "pork loin kamado"
+- "Find videos about Python async programming and summarize them" → "Python async programming"
+- "Search for machine learning tutorials from 3Blue1Brown" → "machine learning 3Blue1Brown"
+
+Search query:"""
+
+        try:
+            client = get_chat_client()
+            response = await client.get_response(prompt)
+            query = response.text.strip().strip('"').strip("'")
+            # Sanity check - if response is too long, it's probably not a query
+            if len(query) > 100:
+                return goal[:100]
+            return query or goal[:100]
+        except Exception:
+            # Fallback to simple truncation if LLM fails
+            return goal[:100]
 
     def _extract_query(self, task: Task) -> str:
         """Extract search query from task description or context.

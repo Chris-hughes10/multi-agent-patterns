@@ -11,6 +11,7 @@ from youtube_agent.infra.client import get_chat_client
 from youtube_agent_v2.core.models.task import MaxDepthExceededError, Task, TaskResult, TaskStatus
 
 if TYPE_CHECKING:
+    from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
     from youtube_agent_v2.core.registry import AgentRegistry
 
 
@@ -66,6 +67,17 @@ class BaseAgent(ABC):
         :return: List of capability strings
         """
         ...
+
+    @property
+    def description(self) -> str:
+        """Human-readable description of what this agent does.
+
+        Used by IntentRouter for semantic matching in autonomous mode.
+        Override in subclasses for more specific descriptions.
+
+        :return: Description string
+        """
+        return f"Agent with capabilities: {', '.join(self.capabilities)}"
 
     @abstractmethod
     def _get_instructions(self) -> str:
@@ -131,6 +143,41 @@ class BaseAgent(ABC):
         except Exception as e:
             task.status = TaskStatus.FAILED
             return TaskResult(success=False, error=str(e))
+
+    async def execute_autonomous(
+        self,
+        goal: str,
+        state: dict[str, Any],
+    ) -> "HandoffResult | PartialResult":
+        """Execute autonomously given a goal and accumulated state.
+
+        In autonomous mode, agents receive:
+        - goal: The original user request (constant across handoffs)
+        - state: Results accumulated from previous agents
+
+        Returns HandoffResult with either:
+        - action="complete" + result: Goal is satisfied
+        - action="handoff" + intent + state: Need another agent
+
+        Default implementation wraps execute() and returns complete.
+        Override for goal-aware reasoning and handoff behavior.
+
+        :param goal: Original user request
+        :param state: Accumulated results from previous agents
+        :return: HandoffResult or PartialResult on error
+        """
+        from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
+
+        task = Task(
+            description=goal,
+            required_capabilities=self.capabilities,
+            context=state,
+        )
+        result = await self.execute(task)
+
+        if result.success:
+            return HandoffResult.complete(result.data)
+        return PartialResult(error=result.error or "Unknown error", partial_data=state)
 
     def submit_task(self, task: Task) -> None:
         """Submit a new task to the queue for processing.

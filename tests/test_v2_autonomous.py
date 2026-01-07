@@ -1,0 +1,690 @@
+"""Tests for V2 Autonomous pattern.
+
+Testing Philosophy: Classicist approach (Kent Beck style)
+- Only mock external/long-running calls (YouTube API, LLM calls)
+- Use real objects for everything else (agents, registry, router, session)
+- Test behavior, not implementation details
+"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from youtube_agent.models.search import VideoSearchResult
+from youtube_agent.models.transcript import Transcript, TranscriptResult, TranscriptSegment, VideoMetadata
+from youtube_agent_v2.agents import (
+    SearchAgent,
+    SummarizeAgent,
+    TranscriptAgent,
+    WriterAgent,
+)
+from youtube_agent_v2.core import AgentRegistry
+from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
+
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def registry() -> AgentRegistry:
+    """Create an empty agent registry."""
+    return AgentRegistry()
+
+
+@pytest.fixture
+def mock_search_results() -> list[VideoSearchResult]:
+    """Create mock search results."""
+    return [
+        VideoSearchResult(
+            video_id="abc123def45",
+            title="Test Video 1",
+            channel="Test Channel",
+            duration="10:30",
+            view_count="1000",
+            published_time="1 day ago",
+        ),
+        VideoSearchResult(
+            video_id="xyz789ghi12",
+            title="Test Video 2",
+            channel="Test Channel 2",
+            duration="5:15",
+            view_count="500",
+            published_time="2 days ago",
+        ),
+    ]
+
+
+@pytest.fixture
+def mock_transcript_result() -> TranscriptResult:
+    """Create a mock transcript result."""
+    return TranscriptResult(
+        metadata=VideoMetadata(
+            video_id="abc123def45",
+            title="Test Video 1",
+            channel="Test Channel",
+        ),
+        transcript=Transcript(
+            video_id="abc123def45",
+            segments=[
+                TranscriptSegment(text="Hello world", start=0.0, duration=1.0),
+                TranscriptSegment(text="This is a test", start=1.0, duration=2.0),
+            ],
+        ),
+    )
+
+
+# ============================================================================
+# Agent Description Tests
+# ============================================================================
+
+
+class TestAgentDescriptions:
+    """Test that all agents have meaningful descriptions for intent routing."""
+
+    def test_search_agent_has_description(self, registry: AgentRegistry) -> None:
+        """SearchAgent should have a description."""
+        agent = SearchAgent(registry)
+        assert agent.description
+        assert "search" in agent.description.lower()
+
+    def test_transcript_agent_has_description(self, registry: AgentRegistry) -> None:
+        """TranscriptAgent should have a description."""
+        agent = TranscriptAgent(registry)
+        assert agent.description
+        assert "transcript" in agent.description.lower()
+
+    def test_summarize_agent_has_description(self, registry: AgentRegistry) -> None:
+        """SummarizeAgent should have a description."""
+        agent = SummarizeAgent(registry)
+        assert agent.description
+        assert "summar" in agent.description.lower()
+
+    def test_writer_agent_has_description(self, registry: AgentRegistry) -> None:
+        """WriterAgent should have a description."""
+        agent = WriterAgent(registry)
+        assert agent.description
+        assert "write" in agent.description.lower() or "export" in agent.description.lower()
+
+
+# ============================================================================
+# SearchAgent Autonomous Tests
+# ============================================================================
+
+
+class TestSearchAgentAutonomous:
+    """Test SearchAgent.execute_autonomous() behavior."""
+
+    @pytest.mark.asyncio
+    async def test_search_completes_when_goal_is_just_search(
+        self,
+        registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """SearchAgent should complete when goal is just searching."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ):
+            result = await agent.execute_autonomous(
+                goal="Search for Python tutorials",
+                state={},
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_complete
+        assert "results" in result.result
+        assert result.result["count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_search_hands_off_when_goal_mentions_transcript(
+        self,
+        registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """SearchAgent should hand off when goal mentions transcripts."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ):
+            result = await agent.execute_autonomous(
+                goal="Find videos about cooking and get their transcripts",
+                state={},
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_handoff
+        assert "transcript" in result.intent.lower()
+        assert "videos" in result.state
+        assert "search" in result.state
+
+    @pytest.mark.asyncio
+    async def test_search_hands_off_when_goal_mentions_summary(
+        self,
+        registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """SearchAgent should hand off when goal mentions summarization."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ):
+            result = await agent.execute_autonomous(
+                goal="Find and summarize videos about machine learning",
+                state={},
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_handoff
+        assert "summarize" in result.intent.lower() or "transcript" in result.intent.lower()
+
+    @pytest.mark.asyncio
+    async def test_search_extracts_query_from_goal(
+        self,
+        registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """SearchAgent should extract search query from natural language goal."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ) as mock_search:
+            await agent.execute_autonomous(
+                goal="Find videos about pork loin cooking",
+                state={},
+            )
+
+        # Check that search was called with extracted query
+        mock_search.assert_called_once()
+        query = mock_search.call_args[0][0]
+        assert "pork loin" in query.lower()
+
+    @pytest.mark.asyncio
+    async def test_search_uses_query_from_state(
+        self,
+        registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """SearchAgent should use query from state if provided."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ) as mock_search:
+            await agent.execute_autonomous(
+                goal="Some random goal",
+                state={"query": "specific query from state"},
+            )
+
+        mock_search.assert_called_once()
+        query = mock_search.call_args[0][0]
+        assert query == "specific query from state"
+
+    @pytest.mark.asyncio
+    async def test_search_returns_partial_on_error(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """SearchAgent should return PartialResult on error."""
+        agent = SearchAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            side_effect=Exception("Network error"),
+        ):
+            result = await agent.execute_autonomous(
+                goal="Search for videos",
+                state={},
+            )
+
+        assert isinstance(result, PartialResult)
+        assert "error" in result.error.lower() or "failed" in result.error.lower()
+
+
+# ============================================================================
+# TranscriptAgent Autonomous Tests
+# ============================================================================
+
+
+class TestTranscriptAgentAutonomous:
+    """Test TranscriptAgent.execute_autonomous() behavior."""
+
+    @pytest.mark.asyncio
+    async def test_transcript_completes_when_goal_is_just_transcript(
+        self,
+        registry: AgentRegistry,
+        mock_transcript_result: TranscriptResult,
+    ) -> None:
+        """TranscriptAgent should complete when goal is just transcripts."""
+        agent = TranscriptAgent(registry)
+
+        with (
+            patch(
+                "youtube_agent_v2.agents.transcript.fetch_transcript",
+                new_callable=AsyncMock,
+                return_value=mock_transcript_result,
+            ),
+            patch(
+                "youtube_agent_v2.agents.transcript.TranscriptStorage"
+            ) as mock_storage_class,
+        ):
+            mock_storage = MagicMock()
+            mock_storage.load.return_value = None  # Not cached
+            mock_storage.save.return_value = None
+            mock_storage_class.return_value = mock_storage
+
+            result = await agent.execute_autonomous(
+                goal="Get the transcript for video abc123def45",
+                state={"video_id": "abc123def45"},
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_complete
+        assert "transcripts" in result.result
+
+    @pytest.mark.asyncio
+    async def test_transcript_hands_off_when_goal_mentions_summary(
+        self,
+        registry: AgentRegistry,
+        mock_transcript_result: TranscriptResult,
+    ) -> None:
+        """TranscriptAgent should hand off when goal mentions summarization."""
+        agent = TranscriptAgent(registry)
+
+        with (
+            patch(
+                "youtube_agent_v2.agents.transcript.fetch_transcript",
+                new_callable=AsyncMock,
+                return_value=mock_transcript_result,
+            ),
+            patch(
+                "youtube_agent_v2.agents.transcript.TranscriptStorage"
+            ) as mock_storage_class,
+        ):
+            mock_storage = MagicMock()
+            mock_storage.load.return_value = None
+            mock_storage.save.return_value = None
+            mock_storage_class.return_value = mock_storage
+
+            result = await agent.execute_autonomous(
+                goal="Get transcript and summarize the key points",
+                state={"video_id": "abc123def45"},
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_handoff
+        assert "summarize" in result.intent.lower()
+        assert "transcript" in result.state
+
+    @pytest.mark.asyncio
+    async def test_transcript_uses_videos_from_state(
+        self,
+        registry: AgentRegistry,
+        mock_transcript_result: TranscriptResult,
+    ) -> None:
+        """TranscriptAgent should use videos from state (from search)."""
+        agent = TranscriptAgent(registry)
+
+        with (
+            patch(
+                "youtube_agent_v2.agents.transcript.fetch_transcript",
+                new_callable=AsyncMock,
+                return_value=mock_transcript_result,
+            ),
+            patch(
+                "youtube_agent_v2.agents.transcript.TranscriptStorage"
+            ) as mock_storage_class,
+        ):
+            mock_storage = MagicMock()
+            mock_storage.load.return_value = None
+            mock_storage.save.return_value = None
+            mock_storage_class.return_value = mock_storage
+
+            result = await agent.execute_autonomous(
+                goal="Get transcripts",
+                state={
+                    "videos": [
+                        {"video_id": "abc123def45", "title": "Video 1"},
+                        {"video_id": "xyz789ghi12", "title": "Video 2"},
+                    ]
+                },
+            )
+
+        assert isinstance(result, HandoffResult)
+        # Should have fetched transcripts for videos from state
+        assert result.result["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_transcript_returns_partial_when_no_video_id(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """TranscriptAgent should return PartialResult when no video ID available."""
+        agent = TranscriptAgent(registry)
+
+        result = await agent.execute_autonomous(
+            goal="Get transcripts",
+            state={},  # No videos or video_id
+        )
+
+        assert isinstance(result, PartialResult)
+        # Error message varies - just check it's an error about fetching
+        assert result.error is not None
+
+
+# ============================================================================
+# SummarizeAgent Autonomous Tests
+# ============================================================================
+
+
+class TestSummarizeAgentAutonomous:
+    """Test SummarizeAgent.execute_autonomous() behavior."""
+
+    @pytest.mark.asyncio
+    async def test_summarize_completes_normally(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """SummarizeAgent should typically complete (final step)."""
+        agent = SummarizeAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
+        ) as mock_summarizer_class:
+            mock_summarizer = MagicMock()
+            mock_summarizer.summarize = AsyncMock(return_value="This is a summary.")
+            mock_summarizer_class.return_value = mock_summarizer
+
+            result = await agent.execute_autonomous(
+                goal="Summarize the cooking instructions",
+                state={
+                    "transcript": {
+                        "transcripts": [
+                            {"video_id": "abc123", "title": "Cooking", "text": "Cook at 350F"}
+                        ]
+                    }
+                },
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_complete
+        assert "summaries" in result.result
+
+    @pytest.mark.asyncio
+    async def test_summarize_hands_off_when_goal_mentions_write(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """SummarizeAgent should hand off when goal mentions writing."""
+        agent = SummarizeAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
+        ) as mock_summarizer_class:
+            mock_summarizer = MagicMock()
+            mock_summarizer.summarize = AsyncMock(return_value="This is a summary.")
+            mock_summarizer_class.return_value = mock_summarizer
+
+            result = await agent.execute_autonomous(
+                goal="Summarize and save to a markdown file",
+                state={
+                    "transcript": {
+                        "transcripts": [
+                            {"video_id": "abc123", "title": "Test", "text": "Content"}
+                        ]
+                    }
+                },
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_handoff
+        assert "write" in result.intent.lower()
+        assert "summarize" in result.state
+
+    @pytest.mark.asyncio
+    async def test_summarize_returns_partial_when_no_transcripts(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """SummarizeAgent should return PartialResult when no transcripts."""
+        agent = SummarizeAgent(registry)
+
+        result = await agent.execute_autonomous(
+            goal="Summarize the content",
+            state={},  # No transcripts
+        )
+
+        assert isinstance(result, PartialResult)
+        assert "no transcript" in result.error.lower()
+
+
+# ============================================================================
+# WriterAgent Autonomous Tests
+# ============================================================================
+
+
+class TestWriterAgentAutonomous:
+    """Test WriterAgent.execute_autonomous() behavior."""
+
+    @pytest.mark.asyncio
+    async def test_writer_always_completes(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """WriterAgent should always complete (final step)."""
+        agent = WriterAgent(registry)
+
+        with patch(
+            "youtube_agent_v2.agents.writer.write_timestamped_markdown",
+            new_callable=AsyncMock,
+            return_value="/output/test_file.md",
+        ):
+            result = await agent.execute_autonomous(
+                goal="Save the research results",
+                state={
+                    "summarize": {
+                        "summaries": [
+                            {"video_id": "abc123", "title": "Test", "summary": "Summary text"}
+                        ]
+                    }
+                },
+            )
+
+        assert isinstance(result, HandoffResult)
+        assert result.is_complete
+        assert "filepath" in result.result
+
+    @pytest.mark.asyncio
+    async def test_writer_builds_content_from_state(
+        self,
+        registry: AgentRegistry,
+    ) -> None:
+        """WriterAgent should build markdown content from accumulated state."""
+        agent = WriterAgent(registry)
+
+        written_content = None
+
+        async def capture_write(content: str, prefix: str = "") -> str:
+            nonlocal written_content
+            written_content = content
+            return f"/output/{prefix}_file.md"
+
+        with patch(
+            "youtube_agent_v2.agents.writer.write_timestamped_markdown",
+            new_callable=AsyncMock,
+            side_effect=capture_write,
+        ):
+            await agent.execute_autonomous(
+                goal="Save cooking research",
+                state={
+                    "search": {
+                        "results": [
+                            {"video_id": "abc123", "title": "Cooking Video", "channel": "Chef"}
+                        ]
+                    },
+                    "summarize": {
+                        "summaries": [
+                            {"video_id": "abc123", "title": "Cooking Video", "summary": "Cook at 350F"}
+                        ]
+                    },
+                },
+            )
+
+        assert written_content is not None
+        assert "Save cooking research" in written_content or "Research" in written_content
+        assert "350F" in written_content or "Summary" in written_content.lower()
+
+
+# ============================================================================
+# Integration Tests - Full Chains
+# ============================================================================
+
+
+class TestAutonomousChain:
+    """Integration tests for full autonomous agent chains."""
+
+    @pytest.fixture
+    def full_registry(self, registry: AgentRegistry) -> AgentRegistry:
+        """Create registry with all agents."""
+        registry.register(SearchAgent(registry))
+        registry.register(TranscriptAgent(registry))
+        registry.register(SummarizeAgent(registry))
+        registry.register(WriterAgent(registry))
+        return registry
+
+    @pytest.mark.asyncio
+    async def test_search_only_chain(
+        self,
+        full_registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+    ) -> None:
+        """Test chain that completes at search."""
+        search_agent = full_registry.get_agent("search")
+
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ):
+            result = await search_agent.execute_autonomous(
+                goal="Find videos about Python",
+                state={},
+            )
+
+        # Should complete without handoff since goal is just search
+        assert isinstance(result, HandoffResult)
+        assert result.is_complete
+
+    @pytest.mark.asyncio
+    async def test_search_to_transcript_handoff(
+        self,
+        full_registry: AgentRegistry,
+        mock_search_results: list[VideoSearchResult],
+        mock_transcript_result: TranscriptResult,
+    ) -> None:
+        """Test search -> transcript handoff."""
+        search_agent = full_registry.get_agent("search")
+        transcript_agent = full_registry.get_agent("transcript")
+
+        # Step 1: Search (goal mentions transcripts so it hands off)
+        with patch(
+            "youtube_agent_v2.agents.search.search_youtube",
+            new_callable=AsyncMock,
+            return_value=mock_search_results,
+        ):
+            search_result = await search_agent.execute_autonomous(
+                goal="Find videos about cooking and get transcripts",
+                state={},
+            )
+
+        assert search_result.is_handoff
+        assert "videos" in search_result.state
+
+        # Step 2: Transcript with a goal that doesn't mention summarization
+        # This tests that transcript completes when goal is just transcripts
+        with (
+            patch(
+                "youtube_agent_v2.agents.transcript.fetch_transcript",
+                new_callable=AsyncMock,
+                return_value=mock_transcript_result,
+            ),
+            patch(
+                "youtube_agent_v2.agents.transcript.TranscriptStorage"
+            ) as mock_storage_class,
+        ):
+            mock_storage = MagicMock()
+            mock_storage.load.return_value = None
+            mock_storage.save.return_value = None
+            mock_storage_class.return_value = mock_storage
+
+            # Use a goal that only asks for transcripts
+            transcript_result = await transcript_agent.execute_autonomous(
+                goal="Get the transcripts from these videos",
+                state=search_result.state,
+            )
+
+        # Should complete since goal doesn't mention summarization
+        assert isinstance(transcript_result, HandoffResult)
+        assert transcript_result.is_complete
+        assert "transcripts" in transcript_result.result
+
+
+# ============================================================================
+# Loop Detection Tests
+# ============================================================================
+
+
+class TestAutonomousLoopDetection:
+    """Tests for loop detection in autonomous pattern."""
+
+    def test_loop_detector_detects_simple_cycle(self) -> None:
+        """Test that LoopDetector detects simple A->B->A cycles."""
+        from youtube_agent_v2.core.loop_detector import LoopDetector
+        from youtube_agent_v2.core.session import ExecutionStep
+
+        # max_visits=2 means agent can be visited at most 2 times, 3rd visit triggers
+        detector = LoopDetector(max_visits=2, window_size=10)
+
+        # Simulate A -> B -> A -> B -> A pattern (A visited 3 times, exceeds max_visits=2)
+        steps = [
+            ExecutionStep.create(agent_name="A", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="B", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="A", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="B", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="A", action="handoff", task_id="1"),
+        ]
+
+        # After 5 steps, A has been visited 3 times which exceeds max_visits=2
+        assert detector.check_for_loop(steps)
+
+    def test_loop_detector_allows_normal_progression(self) -> None:
+        """Test that LoopDetector allows normal agent progression."""
+        from youtube_agent_v2.core.loop_detector import LoopDetector
+        from youtube_agent_v2.core.session import ExecutionStep
+
+        detector = LoopDetector(max_visits=3, window_size=10)
+
+        # Normal progression: search -> transcript -> summarize
+        steps = [
+            ExecutionStep.create(agent_name="search", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="transcript", action="handoff", task_id="1"),
+            ExecutionStep.create(agent_name="summarize", action="complete", task_id="1"),
+        ]
+
+        assert not detector.check_for_loop(steps)
