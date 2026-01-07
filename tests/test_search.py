@@ -2,13 +2,13 @@
 
 import pytest
 
-from youtube_agent.tools.search import (
-    VideoSearchResult,
+from youtube_agent.models.search import VideoSearchResult
+from youtube_agent.services.youtube import (
     YouTubeSearchError,
     _extract_videos_from_html,
     search_youtube,
-    search_youtube_formatted,
 )
+from youtube_agent.tools.search import search_youtube_formatted
 
 
 class TestVideoSearchResult:
@@ -98,10 +98,10 @@ class TestSearchYoutubeFormatted:
     """Tests for search_youtube_formatted function."""
 
     def test_returns_no_videos_message_for_empty_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Mock search_youtube to return empty list
+        # Mock search_youtube in tools.search where search_youtube_formatted uses it
         monkeypatch.setattr(
             "youtube_agent.tools.search.search_youtube",
-            lambda _query, _max_results: [],
+            lambda _query, _max_results=5: [],
         )
         result = search_youtube_formatted("nonexistent video xyz123")
         assert "No videos found" in result
@@ -120,7 +120,7 @@ class TestSearchYoutubeFormatted:
         ]
         monkeypatch.setattr(
             "youtube_agent.tools.search.search_youtube",
-            lambda _query, _max_results: mock_results,
+            lambda _query, _max_results=5: mock_results,
         )
         result = search_youtube_formatted("test")
         assert "Test Video Title" in result

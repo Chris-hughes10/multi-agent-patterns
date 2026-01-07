@@ -1,133 +1,77 @@
-"""Tool for summarizing YouTube transcripts using Azure OpenAI."""
+"""Summarization tools - LLM-callable wrappers.
 
-from azure.identity import AzureCliCredential, get_bearer_token_provider
-from openai import AzureOpenAI
+This module contains tool functions for summarization operations.
+Business logic is in services/summarizer.py.
+"""
 
-from youtube_agent.models.config import Settings, get_settings
+from datetime import UTC, datetime
+from typing import Annotated
+
+from pydantic import Field
+
+from youtube_agent.models.storage import StoredTranscript
 from youtube_agent.models.transcript import TranscriptResult
-from youtube_agent.tools.storage import StoredTranscript, TranscriptStorage
+from youtube_agent.services.storage import TranscriptStorage
+from youtube_agent.services.summarizer import SummarizationError, TranscriptSummarizer
+
+__all__ = [
+    "SummarizationError",
+    "TranscriptSummarizer",
+    "summarize_stored_transcript",
+    "summarize_text",
+    "summarize_transcript",
+    "summarize_video",
+]
 
 
-class SummarizationError(Exception):
-    """Raised when summarization fails.
+def summarize_stored_transcript(
+    video_id: Annotated[str, Field(description="Video ID of stored transcript to summarize")],
+) -> str:
+    """Summarize a previously stored transcript.
 
-    :param reason: Human-readable reason for the failure
+    :param video_id: The video ID to summarize
+    :return: The summary text
     """
+    storage = TranscriptStorage()
+    stored = storage.load(video_id)
+    if stored is None:
+        return f"No stored transcript found for video ID: {video_id}"
 
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(f"Summarization failed: {reason}")
+    if stored.summary:
+        return f"Summary of '{stored.metadata.title}' (cached):\n\n{stored.summary}"
+
+    try:
+        summarizer = TranscriptSummarizer()
+        summary = summarizer.summarize(
+            transcript_text=stored.transcript.full_text,
+            video_title=stored.metadata.title,
+        )
+        return f"Summary of '{stored.metadata.title}':\n\n{summary}"
+    except Exception as e:
+        return f"Error summarizing stored transcript: {e}"
 
 
-class TranscriptSummarizer:
-    """Summarizes YouTube transcripts using Azure OpenAI.
+def summarize_text(
+    text: Annotated[str, Field(description="Text content to summarize")],
+    context: Annotated[
+        str | None, Field(description="Optional context about the text (e.g., video title)")
+    ] = None,
+) -> str:
+    """Summarize arbitrary text content.
 
-    Uses the configured Azure Foundry deployment to generate summaries.
-
-    :param settings: Optional settings instance (uses defaults if not provided)
-    :param client: Optional AzureOpenAI client for dependency injection
+    :param text: The text to summarize
+    :param context: Optional context for better summarization
+    :return: The summary text
     """
-
-    DEFAULT_SYSTEM_PROMPT = """You are an expert at summarizing video content.
-Given a YouTube video transcript, provide a clear and comprehensive summary that:
-1. Captures the main topic and key points
-2. Highlights important insights or takeaways
-3. Is well-structured and easy to read
-4. Preserves any significant quotes or statistics mentioned
-
-Keep the summary concise but informative."""
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        client: AzureOpenAI | None = None,
-    ) -> None:
-        self._settings = settings or get_settings()
-        self._client = client or self._create_client()
-
-    def _create_client(self) -> AzureOpenAI:
-        """Create an Azure OpenAI client from settings.
-
-        Uses Azure AD authentication by default (via DefaultAzureCredential).
-        Falls back to API key if AZURE_OPENAI_API_KEY is set.
-        """
-        if not self._settings.is_configured:
-            raise SummarizationError(
-                "Azure OpenAI not configured. Set AZURE_OPENAI_ENDPOINT "
-                "and AZURE_OPENAI_DEPLOYMENT environment variables."
-            )
-
-        if self._settings.use_azure_ad:
-            # Use Azure CLI authentication to respect current az login session
-            credential_kwargs = {}
-            if self._settings.azure_tenant_id:
-                credential_kwargs["tenant_id"] = self._settings.azure_tenant_id
-            credential = AzureCliCredential(**credential_kwargs)
-            token_provider = get_bearer_token_provider(
-                credential, "https://cognitiveservices.azure.com/.default"
-            )
-            return AzureOpenAI(
-                api_version=self._settings.azure_openai_api_version,
-                azure_endpoint=self._settings.azure_openai_endpoint,
-                azure_ad_token_provider=token_provider,
-            )
-
-        # Fall back to API key authentication
-        return AzureOpenAI(
-            api_key=self._settings.azure_openai_api_key,
-            api_version=self._settings.azure_openai_api_version,
-            azure_endpoint=self._settings.azure_openai_endpoint,
+    try:
+        summarizer = TranscriptSummarizer()
+        summary = summarizer.summarize(
+            transcript_text=text,
+            video_title=context,
         )
-
-    def summarize(
-        self,
-        transcript_text: str,
-        video_title: str | None = None,
-        system_prompt: str | None = None,
-    ) -> str:
-        """Summarize a transcript.
-
-        :param transcript_text: The full transcript text to summarize
-        :param video_title: Optional video title for context
-        :param system_prompt: Optional custom system prompt
-        :return: The generated summary
-        :raises SummarizationError: If summarization fails
-        """
-        system = system_prompt or self.DEFAULT_SYSTEM_PROMPT
-
-        user_content = ""
-        if video_title:
-            user_content = f"Video Title: {video_title}\n\n"
-        user_content += f"Transcript:\n{transcript_text}"
-
-        try:
-            response = self._client.chat.completions.create(
-                model=self._settings.azure_openai_deployment,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_content},
-                ],
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            raise SummarizationError(str(e)) from e
-
-    def summarize_result(
-        self,
-        result: TranscriptResult,
-        system_prompt: str | None = None,
-    ) -> str:
-        """Summarize a TranscriptResult.
-
-        :param result: The transcript result to summarize
-        :param system_prompt: Optional custom system prompt
-        :return: The generated summary
-        """
-        return self.summarize(
-            transcript_text=result.transcript.full_text,
-            video_title=result.metadata.title,
-            system_prompt=system_prompt,
-        )
+        return summary
+    except Exception as e:
+        return f"Error summarizing text: {e}"
 
 
 def summarize_transcript(
@@ -157,8 +101,6 @@ def summarize_transcript(
         return storage.save(result, summary=summary)
 
     # Return without persisting
-    from datetime import UTC, datetime
-
     now = datetime.now(UTC)
     return StoredTranscript(
         video_id=result.metadata.video_id,
@@ -186,7 +128,7 @@ def summarize_video(
     :raises TranscriptFetchError: If transcript cannot be fetched
     :raises SummarizationError: If summarization fails
     """
-    from youtube_agent.tools.transcript import fetch_transcript
+    from youtube_agent.services.youtube import fetch_transcript
 
     result = fetch_transcript(url_or_id, languages=languages)
     return summarize_transcript(result, save=save)

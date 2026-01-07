@@ -42,6 +42,19 @@ PROXY_URL=http://user:pass@your-residential-proxy:port
 
 If you see errors like `TranscriptsDisabled` or connection timeouts when fetching transcripts, this is likely the cause.
 
+### LLM Sampling Settings
+
+Control response determinism with optional temperature and seed settings:
+
+```bash
+# Add to your .env file
+LLM_TEMPERATURE=0.7  # 0.0=deterministic, 1.0=creative (default: 0.7)
+LLM_SEED=42          # Fixed seed for reproducible outputs (default: 42)
+```
+
+- **Temperature**: Lower values (0.0-0.3) produce more focused, deterministic responses. Higher values (0.7-1.0) produce more creative, varied responses.
+- **Seed**: When set, helps produce more consistent outputs across runs (model-dependent).
+
 ## Usage
 
 ### Interactive Chat (Default)
@@ -122,35 +135,59 @@ Debug mode writes detailed logs to `data/logs/session_TIMESTAMP.log` for trouble
 
 ## Architecture
 
-The system uses a multi-agent architecture:
+The system uses a **layered architecture** with clear separation of concerns:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Orchestrator                         │
-│  - Coordinates all agents                               │
-│  - Maintains conversation memory (AgentThread)          │
-│  - Receives context about stored transcripts            │
+│                        cli/                             │
+│                 Command-line interface                  │
 └─────────────────────────────────────────────────────────┘
-                    │
-        ┌───────────┼───────────┐
-        ▼           ▼           ▼
-   ┌─────────┐ ┌──────────┐ ┌───────────┐
-   │ Search  │ │Transcript│ │ Summarize │
-   │  Agent  │ │  Agent   │ │   Agent   │
-   └─────────┘ └──────────┘ └───────────┘
-        │           │              │
-        ▼           ▼              ▼
-   YouTube API   YouTube     Azure OpenAI
-                Transcripts
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                       agents/                           │
+│              Orchestrator + Specialized Agents          │
+│         (Search, Transcript, Summarize, Writer)         │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                       tools/                            │
+│           LLM-callable functions (thin wrappers)        │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                      services/                          │
+│                Business logic classes                   │
+│          (YouTube API, Storage, Summarizer)             │
+└─────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                       models/                           │
+│                 Data structures & config                │
+└─────────────────────────────────────────────────────────┘
 ```
 
-- **SearchAgent**: Searches YouTube for videos
-- **TranscriptAgent**: Fetches and caches video transcripts (the only agent that fetches from YouTube)
-- **SummarizeAgent**: Summarizes text content (does not fetch)
+### Multi-Agent System
 
-### Context Provider
+The orchestrator coordinates four specialized agents:
 
-The `TranscriptContextProvider` automatically injects information about stored transcripts before each agent call. This allows the orchestrator to make smart decisions about when to use cached data vs. searching YouTube.
+| Agent | Responsibility | Calls |
+|-------|---------------|-------|
+| **SearchAgent** | Find videos on YouTube | YouTube search |
+| **TranscriptAgent** | Fetch and cache transcripts | YouTube transcript API |
+| **SummarizeAgent** | Generate summaries | Azure OpenAI |
+| **WriterAgent** | Export to markdown files | File system |
+
+### Key Design Patterns
+
+- **Tools vs Services**: Tools are thin LLM-callable wrappers. Services contain the real business logic.
+- **Domain-Driven**: Services organized by domain (`youtube.py`, `storage.py`, `summarizer.py`)
+- **Context Injection**: `TranscriptContextProvider` tells the orchestrator what's cached before each call
+
+See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural decisions.
 
 ## Development
 

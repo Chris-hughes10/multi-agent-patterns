@@ -106,6 +106,8 @@ class StatusLogHandler(logging.Handler):
         "TranscriptAgent response": ("Got transcript", "success"),
         "SummarizeAgent called": ("Generating summary", "working"),
         "SummarizeAgent response": ("Summary ready", "success"),
+        "WriterAgent called": ("Writing to file", "working"),
+        "WriterAgent response": ("File written", "success"),
         "Cache hit for video": ("Using cached transcript", "success"),
         "Cache miss for video": ("Fetching from YouTube", "working"),
     }

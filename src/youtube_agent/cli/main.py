@@ -4,14 +4,16 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from youtube_agent.agents.orchestrator import create_orchestrator
-from youtube_agent.agents.status import setup_status_monitoring
+from youtube_agent.cli.status import setup_status_monitoring
 from youtube_agent.models.config import get_runtime_config
+from youtube_agent.services.storage import TranscriptStorage
+from youtube_agent.services.youtube import fetch_transcript
 from youtube_agent.tools.search import search_youtube_formatted
-from youtube_agent.tools.storage import TranscriptStorage
 from youtube_agent.tools.summarize import summarize_video
-from youtube_agent.tools.transcript import fetch_transcript
 
 logger = logging.getLogger("youtube_agent")
 
@@ -22,9 +24,6 @@ def setup_logging(debug: bool = False) -> str | None:
     :param debug: If True, enable DEBUG level logging
     :return: Path to log file if debug mode, None otherwise
     """
-    from datetime import datetime
-    from pathlib import Path
-
     level = logging.DEBUG if debug else logging.WARNING
     log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     date_format = "%H:%M:%S"
@@ -99,7 +98,7 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def cmd_list(args: argparse.Namespace) -> None:
+def cmd_list(_args: argparse.Namespace) -> None:
     """Handle list command."""
     storage = TranscriptStorage()
     video_ids = storage.list_videos()

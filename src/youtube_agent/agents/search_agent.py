@@ -2,7 +2,7 @@
 
 from agent_framework import ChatAgent
 
-from youtube_agent.agents.client import get_chat_client
+from youtube_agent.infra.client import get_chat_client
 from youtube_agent.tools.search import search_youtube_formatted
 
 SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent. Your job is to find relevant YouTube videos based on user queries.

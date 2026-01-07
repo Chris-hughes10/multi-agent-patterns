@@ -38,4 +38,6 @@ def get_chat_client() -> AzureOpenAIChatClient:
         endpoint=settings.azure_openai_endpoint,
         deployment_name=settings.azure_openai_deployment,
         api_version=settings.azure_openai_api_version,
+        temperature=settings.llm_temperature,
+        seed=settings.llm_seed,
     )

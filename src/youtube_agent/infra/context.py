@@ -10,7 +10,7 @@ from typing import Any
 from agent_framework._memory import Context, ContextProvider
 from agent_framework._types import ChatMessage
 
-from youtube_agent.tools.storage import TranscriptStorage
+from youtube_agent.services.storage import TranscriptStorage
 
 
 class TranscriptContextProvider(ContextProvider):
