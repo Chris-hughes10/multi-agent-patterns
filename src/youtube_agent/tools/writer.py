@@ -1,5 +1,9 @@
-"""Markdown file writer tool for exporting content."""
+"""Markdown file writer tool for exporting content.
 
+All tool functions are async to avoid blocking the event loop.
+"""
+
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +14,25 @@ from pydantic import Field
 logger = logging.getLogger("youtube_agent.writer")
 
 
-def write_markdown_file(
+def _write_markdown_sync(content: str, filename: str, output_dir: str) -> str:
+    """Synchronous implementation of markdown file writing."""
+    # Ensure filename has .md extension
+    if not filename.endswith(".md"):
+        filename = f"{filename}.md"
+
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Write the file
+    file_path = output_path / filename
+    file_path.write_text(content, encoding="utf-8")
+
+    logger.debug("Wrote markdown file: %s", file_path)
+    return f"Successfully wrote {len(content)} characters to {file_path}"
+
+
+async def write_markdown_file(
     content: Annotated[str, Field(description="Markdown content to write to the file")],
     filename: Annotated[
         str,
@@ -31,31 +53,19 @@ def write_markdown_file(
     :return: Confirmation message with file path
     """
     try:
-        # Ensure filename has .md extension
-        if not filename.endswith(".md"):
-            filename = f"{filename}.md"
-
-        # Create output directory
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # Write the file
-        file_path = output_path / filename
-        file_path.write_text(content, encoding="utf-8")
-
-        logger.debug("Wrote markdown file: %s", file_path)
-        return f"Successfully wrote {len(content)} characters to {file_path}"
-
+        return await asyncio.to_thread(_write_markdown_sync, content, filename, output_dir)
     except Exception as e:
         logger.error("Failed to write markdown file: %s", e)
         return f"Error writing file: {e}"
 
 
-def write_timestamped_markdown(
+async def write_timestamped_markdown(
     content: Annotated[str, Field(description="Markdown content to write to the file")],
     prefix: Annotated[
         str,
-        Field(description="Filename prefix (e.g., 'research' becomes 'research_20240115_143022.md')"),
+        Field(
+            description="Filename prefix (e.g., 'research' becomes 'research_20240115_143022.md')"
+        ),
     ] = "notes",
     output_dir: Annotated[
         str,
@@ -73,4 +83,4 @@ def write_timestamped_markdown(
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{prefix}_{timestamp}.md"
-    return write_markdown_file(content, filename, output_dir)
+    return await write_markdown_file(content, filename, output_dir)

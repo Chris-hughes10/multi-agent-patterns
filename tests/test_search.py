@@ -72,7 +72,7 @@ class TestExtractVideosFromHtml:
 
     def test_extracts_video_data_from_valid_html(self) -> None:
         # Create minimal valid structure with video renderers
-        html = '''<script>var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"videoRenderer":{"videoId":"vid1","title":{"runs":[{"text":"Video 1"}]},"ownerText":{"runs":[{"text":"Channel 1"}]},"lengthText":{"simpleText":"5:00"}}}]}}]}}}}};</script>'''
+        html = """<script>var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"videoRenderer":{"videoId":"vid1","title":{"runs":[{"text":"Video 1"}]},"ownerText":{"runs":[{"text":"Channel 1"}]},"lengthText":{"simpleText":"5:00"}}}]}}]}}}}};</script>"""
         result = _extract_videos_from_html(html, 5)
         assert len(result) == 1
         assert result[0]["video_id"] == "vid1"
@@ -81,32 +81,34 @@ class TestExtractVideosFromHtml:
 
 
 class TestSearchYoutube:
-    """Tests for search_youtube function."""
+    """Tests for search_youtube function (async)."""
 
-    def test_raises_error_for_empty_query(self) -> None:
+    async def test_raises_error_for_empty_query(self) -> None:
         with pytest.raises(YouTubeSearchError) as exc_info:
-            search_youtube("")
+            await search_youtube("")
         assert "empty" in exc_info.value.reason.lower()
 
-    def test_raises_error_for_whitespace_query(self) -> None:
+    async def test_raises_error_for_whitespace_query(self) -> None:
         with pytest.raises(YouTubeSearchError) as exc_info:
-            search_youtube("   ")
+            await search_youtube("   ")
         assert "empty" in exc_info.value.reason.lower()
 
 
 class TestSearchYoutubeFormatted:
-    """Tests for search_youtube_formatted function."""
+    """Tests for search_youtube_formatted function (async)."""
 
-    def test_returns_no_videos_message_for_empty_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_returns_no_videos_message_for_empty_results(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Mock search_youtube in tools.search where search_youtube_formatted uses it
-        monkeypatch.setattr(
-            "youtube_agent.tools.search.search_youtube",
-            lambda _query, _max_results=5: [],
-        )
-        result = search_youtube_formatted("nonexistent video xyz123")
+        async def mock_search(_query: str, _max_results: int = 5) -> list:
+            return []
+
+        monkeypatch.setattr("youtube_agent.tools.search.search_youtube", mock_search)
+        result = await search_youtube_formatted("nonexistent video xyz123")
         assert "No videos found" in result
 
-    def test_formats_results_with_video_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_formats_results_with_video_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Mock search_youtube to return test data
         mock_results = [
             VideoSearchResult(
@@ -118,11 +120,12 @@ class TestSearchYoutubeFormatted:
                 published_time="1 day ago",
             ),
         ]
-        monkeypatch.setattr(
-            "youtube_agent.tools.search.search_youtube",
-            lambda _query, _max_results=5: mock_results,
-        )
-        result = search_youtube_formatted("test")
+
+        async def mock_search(_query: str, _max_results: int = 5) -> list:
+            return mock_results
+
+        monkeypatch.setattr("youtube_agent.tools.search.search_youtube", mock_search)
+        result = await search_youtube_formatted("test")
         assert "Test Video Title" in result
         assert "Test Channel" in result
         assert "5:30" in result

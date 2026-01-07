@@ -2,6 +2,8 @@
 
 This module contains only the tool function that exposes the search
 service to the LLM. Business logic is in services/youtube.py.
+
+All tool functions are async to avoid blocking the event loop.
 """
 
 from typing import Annotated
@@ -15,22 +17,20 @@ from youtube_agent.services.youtube import YouTubeSearchError, search_youtube
 __all__ = ["VideoSearchResult", "YouTubeSearchError", "search_youtube_formatted"]
 
 
-def search_youtube_formatted(
+async def search_youtube_formatted(
     query: Annotated[str, Field(description="Search query for YouTube videos")],
-    max_results: Annotated[
-        int, Field(description="Maximum number of results to return")
-    ] = 5,
+    max_results: Annotated[int, Field(description="Maximum number of results to return")] = 5,
 ) -> str:
     """Search YouTube and return formatted string results.
 
-    This is the agent-friendly version that returns a formatted string
+    This is the agent-friendly async version that returns a formatted string
     suitable for LLM consumption.
 
     :param query: Search query string
     :param max_results: Maximum number of results (default 5)
     :return: Formatted string with search results
     """
-    results = search_youtube(query, max_results)
+    results = await search_youtube(query, max_results)
 
     if not results:
         return f"No videos found for query: {query}"

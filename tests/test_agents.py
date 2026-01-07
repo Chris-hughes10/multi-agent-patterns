@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from youtube_agent.agents.search_agent import create_search_agent
 from youtube_agent.agents.summarize_agent import create_summarize_agent
@@ -58,35 +58,35 @@ class TestWriterAgent:
 
 
 class TestTranscriptTools:
-    """Tests for transcript tool functions."""
+    """Tests for transcript tool functions (async)."""
 
     @patch("youtube_agent.tools.transcript.TranscriptStorage")
-    def test_list_stored_transcripts_returns_message_when_empty(
+    async def test_list_stored_transcripts_returns_message_when_empty(
         self, mock_storage_class: MagicMock
     ) -> None:
         mock_storage = MagicMock()
         mock_storage.list_videos.return_value = []
         mock_storage_class.return_value = mock_storage
 
-        result = list_stored_transcripts()
+        result = await list_stored_transcripts()
         assert "No transcripts" in result
 
     @patch("youtube_agent.tools.transcript.TranscriptStorage")
-    def test_lookup_stored_transcript_returns_error_for_missing(
+    async def test_lookup_stored_transcript_returns_error_for_missing(
         self, mock_storage_class: MagicMock
     ) -> None:
         mock_storage = MagicMock()
         mock_storage.load.return_value = None
         mock_storage_class.return_value = mock_storage
 
-        result = lookup_stored_transcript("nonexistent123")
+        result = await lookup_stored_transcript("nonexistent123")
         assert "no stored transcript" in result.lower()
 
     @patch("youtube_agent.tools.transcript.get_runtime_config")
     @patch("youtube_agent.tools.transcript.TranscriptStorage")
-    @patch("youtube_agent.tools.transcript.fetch_transcript")
-    def test_fetch_video_transcript_returns_formatted_output(
-        self, mock_fetch: MagicMock, mock_storage_class: MagicMock, mock_config: MagicMock
+    @patch("youtube_agent.tools.transcript.fetch_transcript", new_callable=AsyncMock)
+    async def test_fetch_video_transcript_returns_formatted_output(
+        self, mock_fetch: AsyncMock, mock_storage_class: MagicMock, mock_config: MagicMock
     ) -> None:
         mock_storage = MagicMock()
         mock_storage.load.return_value = None
@@ -100,13 +100,13 @@ class TestTranscriptTools:
         mock_result.transcript.duration_seconds = 300.0
         mock_fetch.return_value = mock_result
 
-        result = fetch_video_transcript("dQw4w9WgXcQ")
+        result = await fetch_video_transcript("dQw4w9WgXcQ")
         assert "Test Video" in result
         assert "transcript text" in result
 
     @patch("youtube_agent.tools.transcript.TranscriptStorage")
     @patch("youtube_agent.tools.transcript.fetch_transcript")
-    def test_fetch_video_transcript_handles_errors(
+    async def test_fetch_video_transcript_handles_errors(
         self, mock_fetch: MagicMock, mock_storage_class: MagicMock
     ) -> None:
         mock_storage = MagicMock()
@@ -114,11 +114,11 @@ class TestTranscriptTools:
         mock_storage_class.return_value = mock_storage
         mock_fetch.side_effect = Exception("Transcript unavailable")
 
-        result = fetch_video_transcript("dQw4w9WgXcQ")
+        result = await fetch_video_transcript("dQw4w9WgXcQ")
         assert "Error" in result
 
     @patch("youtube_agent.tools.transcript.TranscriptStorage")
-    def test_fetch_video_transcript_uses_cache(self, mock_storage_class: MagicMock) -> None:
+    async def test_fetch_video_transcript_uses_cache(self, mock_storage_class: MagicMock) -> None:
         """Should return cached transcript without calling YouTube API."""
         mock_storage = MagicMock()
         mock_stored = MagicMock()
@@ -127,35 +127,37 @@ class TestTranscriptTools:
         mock_storage.load.return_value = mock_stored
         mock_storage_class.return_value = mock_storage
 
-        result = fetch_video_transcript("dQw4w9WgXcQ")
+        result = await fetch_video_transcript("dQw4w9WgXcQ")
         assert "Cached Video" in result
         assert "cache" in result.lower()
 
 
 class TestSummarizeTools:
-    """Tests for summarize tool functions."""
+    """Tests for summarize tool functions (async)."""
 
     @patch("youtube_agent.tools.summarize.TranscriptStorage")
-    def test_summarize_stored_transcript_returns_error_for_missing(
+    async def test_summarize_stored_transcript_returns_error_for_missing(
         self, mock_storage_class: MagicMock
     ) -> None:
         mock_storage = MagicMock()
         mock_storage.load.return_value = None
         mock_storage_class.return_value = mock_storage
-        result = summarize_stored_transcript("nonexistent123")
+        result = await summarize_stored_transcript("nonexistent123")
         assert "No stored transcript" in result
 
     @patch("youtube_agent.tools.summarize.TranscriptSummarizer")
-    def test_summarize_text_handles_errors(self, mock_summarizer_class: MagicMock) -> None:
+    async def test_summarize_text_handles_errors(self, mock_summarizer_class: MagicMock) -> None:
         mock_summarizer = MagicMock()
-        mock_summarizer.summarize.side_effect = Exception("API error")
+        mock_summarizer.summarize = AsyncMock(side_effect=Exception("API error"))
         mock_summarizer_class.return_value = mock_summarizer
 
-        result = summarize_text("Some text to summarize")
+        result = await summarize_text("Some text to summarize")
         assert "Error" in result
 
     @patch("youtube_agent.tools.summarize.TranscriptStorage")
-    def test_summarize_stored_returns_cached_summary(self, mock_storage_class: MagicMock) -> None:
+    async def test_summarize_stored_returns_cached_summary(
+        self, mock_storage_class: MagicMock
+    ) -> None:
         """Should return cached summary without calling LLM."""
         mock_storage = MagicMock()
         mock_stored = MagicMock()
@@ -164,17 +166,17 @@ class TestSummarizeTools:
         mock_storage.load.return_value = mock_stored
         mock_storage_class.return_value = mock_storage
 
-        result = summarize_stored_transcript("test123abcd")
+        result = await summarize_stored_transcript("test123abcd")
         assert "Summarized Video" in result
         assert "cached" in result.lower()
 
 
 class TestWriterTools:
-    """Tests for writer tool functions."""
+    """Tests for writer tool functions (async)."""
 
-    def test_write_markdown_file_creates_file(self) -> None:
+    async def test_write_markdown_file_creates_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = write_markdown_file(
+            result = await write_markdown_file(
                 content="# Test\n\nHello world",
                 filename="test.md",
                 output_dir=tmpdir,
@@ -183,9 +185,9 @@ class TestWriterTools:
             assert Path(tmpdir, "test.md").exists()
             assert Path(tmpdir, "test.md").read_text() == "# Test\n\nHello world"
 
-    def test_write_markdown_file_adds_extension(self) -> None:
+    async def test_write_markdown_file_adds_extension(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = write_markdown_file(
+            result = await write_markdown_file(
                 content="# Test",
                 filename="notes",
                 output_dir=tmpdir,
@@ -193,10 +195,10 @@ class TestWriterTools:
             assert "Successfully wrote" in result
             assert Path(tmpdir, "notes.md").exists()
 
-    def test_write_markdown_file_creates_directory(self) -> None:
+    async def test_write_markdown_file_creates_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             subdir = Path(tmpdir, "nested", "dir")
-            result = write_markdown_file(
+            result = await write_markdown_file(
                 content="# Test",
                 filename="test.md",
                 output_dir=str(subdir),
@@ -204,9 +206,9 @@ class TestWriterTools:
             assert "Successfully wrote" in result
             assert subdir.exists()
 
-    def test_write_timestamped_markdown_creates_unique_file(self) -> None:
+    async def test_write_timestamped_markdown_creates_unique_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = write_timestamped_markdown(
+            result = await write_timestamped_markdown(
                 content="# Notes",
                 prefix="research",
                 output_dir=tmpdir,
