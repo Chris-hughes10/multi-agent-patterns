@@ -1,7 +1,12 @@
-"""End-to-end test script for parallel execution via Synthesizer."""
+"""End-to-end test script for parallel execution via Synthesizer.
+
+Uses the shared main module functions for consistency with CLI.
+"""
 
 import asyncio
 import logging
+
+from youtube_autonomous_agents.application.main import process_request
 
 # Enable logging at INFO level for key components
 logging.basicConfig(
@@ -18,27 +23,6 @@ logging.getLogger("youtube_autonomous_agents.agents.writer").setLevel(logging.IN
 
 
 async def main():
-    from youtube_autonomous_agents.agents import (
-        SearchAgent,
-        SummarizeAgent,
-        TranscriptAgent,
-        WriterAgent,
-    )
-    from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
-    from youtube_autonomous_agents.infra import AgentRegistry
-
-    # Create registry with all agents
-    registry = AgentRegistry()
-    registry.register(SearchAgent(registry))
-    registry.register(TranscriptAgent(registry))
-    registry.register(SummarizeAgent(registry))
-    registry.register(WriterAgent(registry))
-
-    print(f"\nRegistered {len(registry)} agents: {[a.name for a in registry.all_agents()]}")
-
-    # Create synthesizer (entry point with parallelism detection)
-    synthesizer = SynthesizerAgent(registry)
-
     # The request that should trigger parallel searches AND write to file
     request = """I want to cook a pork loin roast on a Kamado grill/smoker. I would like some info on how to do this based on techniques on YouTube. Some channels I trust are fork and embers and chuds bbq. Ideally, I need to know the temperature, the grill setup, the internal temperature and the time. Save the results to pork_loin_research.md"""
 
@@ -49,7 +33,7 @@ async def main():
     print("=" * 60 + "\n")
 
     try:
-        response = await synthesizer.process_request(request, timeout=180.0)
+        response = await process_request(request, timeout=180.0)
         print("\n" + "=" * 60)
         print("FINAL RESPONSE:")
         print("=" * 60)

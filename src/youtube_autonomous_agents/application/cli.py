@@ -1,56 +1,22 @@
-"""CLI entry point using SynthesizerAgent for autonomous multi-agent coordination."""
+"""CLI entry point using shared driver functions."""
 
 import asyncio
 import logging
 
 import click
 
-from youtube_autonomous_agents.agents import (
-    SearchAgent,
-    SummarizeAgent,
-    SynthesizerAgent,
-    TranscriptAgent,
-    WriterAgent,
+from youtube_autonomous_agents.application.main import (
+    create_synthesizer,
+    list_agents,
+    process_request,
 )
-from youtube_autonomous_agents.infra import AgentRegistry
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("youtube_autonomous_agents.application")
-
-
-def create_registry() -> AgentRegistry:
-    """Create and populate an agent registry with all agents.
-
-    :return: Configured AgentRegistry
-    """
-    registry = AgentRegistry()
-
-    # Create and register all agents
-    registry.register(SearchAgent(registry))
-    registry.register(TranscriptAgent(registry))
-    registry.register(SummarizeAgent(registry))
-    registry.register(WriterAgent(registry))
-
-    logger.info(
-        "Registered %d agents: %s",
-        len(registry),
-        [a.name for a in registry.all_agents()],
-    )
-
-    return registry
-
-
-def create_synthesizer() -> SynthesizerAgent:
-    """Create the SynthesizerAgent - the user-facing entry point.
-
-    :return: Configured SynthesizerAgent
-    """
-    registry = create_registry()
-    return SynthesizerAgent(registry)
+logger = logging.getLogger("youtube_autonomous_agents.cli")
 
 
 @click.group()
@@ -71,42 +37,27 @@ def cli(verbose: bool) -> None:
 @click.option("-n", "--max-results", default=5, help="Maximum results to return")
 def search(query: str, max_results: int) -> None:
     """Search YouTube for videos matching QUERY."""
-
-    async def run() -> None:
-        synth = create_synthesizer()
-        request = f"Search YouTube for: {query}. Return up to {max_results} results."
-        result = await synth.process_request(request)
-        click.echo(result)
-
-    asyncio.run(run())
+    request = f"Search YouTube for: {query}. Return up to {max_results} results."
+    result = asyncio.run(process_request(request))
+    click.echo(result)
 
 
 @cli.command()
 @click.argument("video_id")
 def transcript(video_id: str) -> None:
     """Fetch transcript for VIDEO_ID."""
-
-    async def run() -> None:
-        synth = create_synthesizer()
-        request = f"Fetch the transcript for YouTube video: {video_id}"
-        result = await synth.process_request(request)
-        click.echo(result)
-
-    asyncio.run(run())
+    request = f"Fetch the transcript for YouTube video: {video_id}"
+    result = asyncio.run(process_request(request))
+    click.echo(result)
 
 
 @cli.command()
 @click.argument("video_id")
 def summarize(video_id: str) -> None:
     """Summarize stored transcript for VIDEO_ID."""
-
-    async def run() -> None:
-        synth = create_synthesizer()
-        request = f"Summarize the stored transcript for video: {video_id}"
-        result = await synth.process_request(request)
-        click.echo(result)
-
-    asyncio.run(run())
+    request = f"Summarize the stored transcript for video: {video_id}"
+    result = asyncio.run(process_request(request))
+    click.echo(result)
 
 
 @cli.command()
@@ -115,36 +66,35 @@ def summarize(video_id: str) -> None:
 @click.option("-d", "--output-dir", default="output", help="Output directory")
 def write(content: str, filename: str, output_dir: str) -> None:
     """Write CONTENT to FILENAME as markdown."""
-
-    async def run() -> None:
-        synth = create_synthesizer()
-        request = f"Write the following content to {filename} in {output_dir}: {content}"
-        result = await synth.process_request(request)
-        click.echo(result)
-
-    asyncio.run(run())
+    request = f"Write the following content to {filename} in {output_dir}: {content}"
+    result = asyncio.run(process_request(request))
+    click.echo(result)
 
 
 @cli.command()
 def agents() -> None:
     """List registered agents and their capabilities."""
-    registry = create_registry()
+    agent_list = list_agents()
 
     click.echo("\nRegistered Agents:")
     click.echo("-" * 40)
 
-    for agent in registry.all_agents():
-        click.echo(f"\n  {agent.name}:")
-        click.echo(f"    Capabilities: {', '.join(agent.capabilities)}")
+    for agent in agent_list:
+        click.echo(f"\n  {agent['name']}:")
+        click.echo(f"    Capabilities: {', '.join(agent['capabilities'])}")
 
     click.echo("\n" + "-" * 40)
-    click.echo(f"Total: {len(registry)} agents")
-    click.echo(f"All capabilities: {', '.join(registry.all_capabilities())}")
+    click.echo(f"Total: {len(agent_list)} agents")
+
+    all_caps = set()
+    for agent in agent_list:
+        all_caps.update(agent["capabilities"])
+    click.echo(f"All capabilities: {', '.join(sorted(all_caps))}")
 
 
 @cli.command()
-@click.option("-r", "--request", default=None, help="Single request (interactive if not provided)")
-def chat(request: str | None) -> None:
+@click.option("-r", "--request", "user_request", default=None, help="Single request (interactive if not provided)")
+def chat(user_request: str | None) -> None:
     """Interactive chat mode with the SynthesizerAgent."""
 
     async def run_chat() -> None:
@@ -156,9 +106,9 @@ def chat(request: str | None) -> None:
         click.echo("Type 'exit' or 'quit' to stop.\n")
 
         # Single request mode
-        if request:
+        if user_request:
             click.echo("[Synthesizer] Processing request...")
-            result = await synth.process_request(request)
+            result = await process_request(user_request, synthesizer=synth)
             click.echo(result)
             return
 
@@ -175,7 +125,7 @@ def chat(request: str | None) -> None:
                     break
 
                 click.echo("\n[Synthesizer] Processing...")
-                result = await synth.process_request(user_input)
+                result = await process_request(user_input, synthesizer=synth)
                 click.echo(f"\nAgent: {result}\n")
 
             except KeyboardInterrupt:
