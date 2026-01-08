@@ -73,26 +73,86 @@ In the autonomous model, every agent receives two things:
 
 Each agent then reasons: "Given this goal and what we have so far, can I complete the request? Or should someone else continue?"
 
+### The Structure
+
+The codebase structure changes to support this pattern:
+
+```
+src/youtube_autonomous_agents/
+├── application/          # Entry points (same as before)
+│   ├── cli.py
+│   └── main.py
+├── agents/               # Now with goal-aware execution
+│   ├── base.py           # BaseAgent with execute_autonomous()
+│   ├── search.py
+│   ├── transcript.py
+│   ├── summarize.py
+│   └── writer.py
+├── infra/                # Coordination infrastructure
+│   ├── pool.py           # SelfSelectingPool
+│   ├── registry.py       # Agent discovery
+│   ├── task_queue.py     # Event-driven queue
+│   └── intent_router.py  # LLM-based routing
+└── models/
+    ├── task.py           # Task, TaskResult
+    └── handoff.py        # HandoffResult types
+```
+
+The key differences from the orchestrator pattern:
+- No central orchestrator agent
+- New `infra/` layer for coordination primitives
+- Agents gain `execute_autonomous()` method
+- New `HandoffResult` types for explicit signaling
+
+**What doesn't change**: The domain layer. YouTube search, transcript fetching, summarization - all the actual work - stays in the same services. The autonomous pattern is a coordination layer, not a rewrite of business logic.
+
+### How Agent Definitions Change
+
+In Part 1, we saw agents defined with instructions and tools:
+
 ```python
-async def execute_autonomous(
-    self,
-    goal: str,        # Original user request (stays constant)
-    state: dict,      # Results from previous agents (grows)
-) -> HandoffResult:
-    """Execute with awareness of the overall goal."""
-
-    # Do my specialized work
-    results = await self.do_my_work(state)
-
-    # Reason about whether the goal is satisfied
-    if self._goal_is_satisfied(goal, results):
-        return HandoffResult.complete(results)
-    else:
-        return HandoffResult.handoff(
-            intent="What needs to happen next",
-            state={**state, "my_results": results}
+# Orchestrator pattern: agent executes tools, returns to coordinator
+class SearchAgent:
+    def get_agent(self) -> ChatAgent:
+        return ChatAgent(
+            name="SearchAgent",
+            instructions="You are a YouTube Search Agent...",
+            tools=[search_youtube_formatted],
         )
 ```
+
+In the autonomous pattern, agents gain goal-awareness:
+
+```python
+# Autonomous pattern: agent reasons about the goal
+class SearchAgent(BaseAgent):
+    @property
+    def name(self) -> str:
+        return "search"
+
+    @property
+    def capabilities(self) -> list[str]:
+        return ["youtube_search", "video_discovery"]
+
+    async def execute_autonomous(
+        self,
+        goal: str,
+        state: dict,
+    ) -> HandoffResult:
+        # Do the search
+        results = await search_youtube(query)
+
+        # Reason: is the goal satisfied?
+        if self._goal_is_satisfied(goal, results):
+            return HandoffResult.complete(results)
+        else:
+            return HandoffResult.handoff(
+                intent="Get transcripts for these videos",
+                state={**state, "videos": results}
+            )
+```
+
+The agent still calls the same `search_youtube` service. But now it also reasons about what should happen next.
 
 This is philosophically different from most agent frameworks. The agent isn't just executing a command - it's understanding intent and deciding the appropriate next step.
 

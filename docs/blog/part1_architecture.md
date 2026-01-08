@@ -387,6 +387,88 @@ The orchestrator:
 
 This separation means we can test each specialist agent independently, with clear inputs and outputs.
 
+### What an Agent Looks Like
+
+An agent definition is surprisingly simple. Here's the SearchAgent:
+
+```python
+class SearchAgent:
+    """Agent specialized for YouTube video search."""
+
+    def get_agent(self) -> ChatAgent:
+        return ChatAgent(
+            name="SearchAgent",
+            instructions="""You are a YouTube Search Agent.
+            Your job is to find relevant YouTube videos based on user queries.
+            Use the search_youtube tool to find videos.
+            You ONLY search - you do not fetch transcripts or summarize.""",
+            tools=[search_youtube_formatted],  # Tool from tools/ layer
+        )
+```
+
+Notice the pattern:
+- **Instructions** define the agent's persona and boundaries
+- **Tools** are functions from the `tools/` layer (which call services)
+- The agent doesn't know about YouTube APIs - it just calls tools
+
+### What the Orchestrator Looks Like
+
+The orchestrator follows the same pattern, but its tools delegate to other agents:
+
+```python
+class OrchestratorAgent:
+    """Coordinates sub-agents for YouTube research tasks."""
+
+    def get_orchestrator(self) -> ChatAgent:
+        return ChatAgent(
+            name="Orchestrator",
+            instructions="""You coordinate YouTube research tasks.
+            You have access to specialist agents - delegate to them.
+            Never try to search YouTube or fetch transcripts yourself.""",
+            tools=[
+                self.ask_search_agent,
+                self.ask_transcript_agent,
+                self.ask_summarize_agent,
+                self.ask_writer_agent,
+            ],
+        )
+
+    async def ask_search_agent(self, request: str) -> str:
+        """Delegate a search request to the Search Agent."""
+        agent = SearchAgent().get_agent()
+        result = await agent.run(request)
+        return result.text
+
+    async def ask_transcript_agent(self, request: str) -> str:
+        """Delegate a transcript request to the Transcript Agent."""
+        agent = TranscriptAgent().get_agent()
+        result = await agent.run(request)
+        return result.text
+
+    # ... similar for summarize and writer
+```
+
+The orchestrator's "tools" are delegation functions. When the LLM decides to search, it calls `ask_search_agent`, which runs the SearchAgent and returns its result. The orchestrator sees the result and decides what to do next.
+
+This is the hub-and-spoke pattern:
+
+```
+                    ┌─────────────┐
+                    │ Orchestrator│
+                    │   (LLM)     │
+                    └──────┬──────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+         ▼                 ▼                 ▼
+    ┌─────────┐      ┌─────────┐      ┌─────────┐
+    │ Search  │      │Transcript│     │Summarize│
+    │  Agent  │      │  Agent  │      │  Agent  │
+    └─────────┘      └─────────┘      └─────────┘
+```
+
+Every interaction flows through the center. The orchestrator accumulates context from each step, maintaining the full conversation history.
+
 ### Context Injection
 
 One subtle but important pattern: the orchestrator needs to know what transcripts are already cached to make smart decisions. We use a `TranscriptContextProvider` that injects this information before each LLM call:
