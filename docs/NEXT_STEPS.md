@@ -54,13 +54,20 @@ youtube-agent-planner # Planner + DAG
 
 ## Remaining Tasks
 
-### 1. CLI Flags for max_transcripts
+### ~~1. CLI Flags for max_transcripts~~ ✅ DONE
 
-Add `--max-transcripts` flag to the CLI.
+Added `--max-transcripts` / `-t` flag to the CLI chat command.
 
-**Files to modify:**
-- `src/youtube_autonomous_agents/application/cli.py` - Add CLI flag
-- `src/youtube_autonomous_agents/agents/synthesizer.py` - Pass to initial state
+```bash
+# Default (5 transcripts)
+uv run youtube-agent-v2 chat -r "Find videos about cooking"
+
+# Custom limit
+uv run youtube-agent-v2 chat -t 3 -r "Find videos about cooking"
+```
+
+**Implementation:** Uses a general `context: dict` parameter pattern that flows through:
+- `cli.py` → `main.py` → `synthesizer.py` → pool → agents
 
 ### 2. Blog Post Series
 
@@ -93,6 +100,7 @@ uv run pytest tests/test_v2_autonomous.py -v --tb=short
 | Component | Path |
 |-----------|------|
 | CLI Entry | `src/youtube_autonomous_agents/application/cli.py` |
+| Driver Functions | `src/youtube_autonomous_agents/application/main.py` |
 | Synthesizer | `src/youtube_autonomous_agents/agents/synthesizer.py` |
 | Pool Coordination | `src/youtube_autonomous_agents/infra/pool.py` |
 | BaseAgent | `src/youtube_autonomous_agents/agents/base.py` |

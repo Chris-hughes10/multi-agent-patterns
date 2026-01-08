@@ -242,6 +242,9 @@ uv run youtube-agent-v2 chat
 
 # Single request - agents chain automatically
 uv run youtube-agent-v2 chat -r "Find videos about cooking and summarize them"
+
+# Limit transcripts fetched (default: 5)
+uv run youtube-agent-v2 chat -t 3 -r "Find BBQ videos and summarize them"
 ```
 
 ### Example Flow

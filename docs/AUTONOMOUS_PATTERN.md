@@ -184,6 +184,13 @@ The autonomous pattern is the default (and only) pattern in V2.
 uv run youtube-agent-v2 chat -r "Find pork loin recipes from Chuds BBQ, get the transcripts, summarize the cooking temps and times, and save to pork_loin_notes.md"
 ```
 
+### Limit Transcripts Fetched
+
+```bash
+# Default fetches up to 5 transcripts
+uv run youtube-agent-v2 chat -t 3 -r "Find BBQ videos and summarize them"
+```
+
 ### Verbose Mode (See Execution Path)
 
 ```bash
@@ -280,10 +287,11 @@ See [V2_IMPLEMENTATION_PLAN.md](./V2_IMPLEMENTATION_PLAN.md) for full details.
 
 | Component | Path |
 |-----------|------|
-| Self-Selection Pool | `src/youtube_autonomous_agents/patterns/self_selection.py` |
-| Task Queue | `src/youtube_autonomous_agents/core/task_queue.py` |
-| Intent Router | `src/youtube_autonomous_agents/core/intent_router.py` |
-| Base Agent | `src/youtube_autonomous_agents/core/base_agent.py` |
-| Handoff Models | `src/youtube_autonomous_agents/core/models/handoff.py` |
+| Self-Selection Pool | `src/youtube_autonomous_agents/infra/pool.py` |
+| Task Queue | `src/youtube_autonomous_agents/infra/task_queue.py` |
+| Intent Router | `src/youtube_autonomous_agents/infra/intent_router.py` |
+| Base Agent | `src/youtube_autonomous_agents/agents/base.py` |
+| Handoff Models | `src/youtube_autonomous_agents/models/handoff.py` |
 | Agents | `src/youtube_autonomous_agents/agents/` |
-| CLI Entry | `src/youtube_autonomous_agents/cli/main.py` |
+| CLI Entry | `src/youtube_autonomous_agents/application/cli.py` |
+| Driver Functions | `src/youtube_autonomous_agents/application/main.py` |
