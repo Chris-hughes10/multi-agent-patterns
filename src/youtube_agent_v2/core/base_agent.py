@@ -1,8 +1,9 @@
 """Base agent abstract class for V2 multi-agent patterns."""
 
+import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIChatClient
@@ -11,8 +12,10 @@ from youtube_agent.infra.client import get_chat_client
 from youtube_agent_v2.core.models.task import MaxDepthExceededError, Task, TaskResult, TaskStatus
 
 if TYPE_CHECKING:
-    from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
+    from youtube_agent_v2.core.models.handoff import HandoffResult, OperationTimeout, PartialResult
     from youtube_agent_v2.core.registry import AgentRegistry
+
+T = TypeVar("T")
 
 
 class BaseAgent(ABC):
@@ -33,19 +36,25 @@ class BaseAgent(ABC):
     :param client: Optional AzureOpenAIChatClient (uses default if not provided)
     """
 
+    # Default timeout for LLM operations (can be overridden per-agent or per-call)
+    DEFAULT_LLM_TIMEOUT: float = 30.0
+
     def __init__(
         self,
         registry: "AgentRegistry",
         client: AzureOpenAIChatClient | None = None,
+        llm_timeout: float | None = None,
     ) -> None:
         """Initialize the agent with registry and optional client.
 
         :param registry: Registry for agent discovery and task submission
         :param client: Optional custom chat client (defaults to shared client)
+        :param llm_timeout: Timeout for LLM operations (defaults to DEFAULT_LLM_TIMEOUT)
         """
         self._registry = registry
         self._client = client or get_chat_client()
         self._chat_agent: ChatAgent | None = None
+        self._llm_timeout = llm_timeout or self.DEFAULT_LLM_TIMEOUT
 
     @property
     @abstractmethod
@@ -172,6 +181,81 @@ class BaseAgent(ABC):
                 tools=self._get_tools(),
             )
         return self._chat_agent
+
+    async def _call_with_timeout(
+        self,
+        coro: Coroutine[Any, Any, T],
+        operation: str,
+        timeout: float | None = None,
+        context: dict[str, Any] | None = None,
+        suggested_fallback: str | None = None,
+        retryable: bool = True,
+    ) -> T | "OperationTimeout":
+        """Execute an async operation with timeout, returning context on failure.
+
+        Instead of raising TimeoutError, returns an OperationTimeout object
+        that agents can use to reason about the failure and decide how to proceed.
+
+        Example:
+            result = await self._call_with_timeout(
+                self._client.get_response(prompt),
+                operation="goal_reasoning",
+                context={"goal": goal},
+                suggested_fallback="Use keyword matching instead"
+            )
+            if isinstance(result, OperationTimeout):
+                # Handle timeout - maybe use fallback or hand off
+                logger.warning(f"Timeout: {result}")
+                return self._fallback_reasoning(goal)
+
+        :param coro: The coroutine to execute
+        :param operation: Name/type of operation (for error context)
+        :param timeout: Override default timeout (None = use self._llm_timeout)
+        :param context: Additional context to include if timeout occurs
+        :param suggested_fallback: Hint for how to proceed on timeout
+        :param retryable: Whether this operation could be retried
+        :return: The coroutine result, or OperationTimeout if timed out
+        """
+        from youtube_agent_v2.core.models.handoff import OperationTimeout
+
+        effective_timeout = timeout if timeout is not None else self._llm_timeout
+
+        try:
+            return await asyncio.wait_for(coro, timeout=effective_timeout)
+        except TimeoutError:
+            return OperationTimeout(
+                operation=operation,
+                timeout_seconds=effective_timeout,
+                context=context or {},
+                suggested_fallback=suggested_fallback,
+                retryable=retryable,
+            )
+
+    async def _call_with_timeout_or_raise(
+        self,
+        coro: Coroutine[Any, Any, T],
+        operation: str,
+        timeout: float | None = None,
+    ) -> T:
+        """Execute an async operation with timeout, raising on failure.
+
+        Use this when you want traditional exception behavior rather than
+        the OperationTimeout result pattern.
+
+        :param coro: The coroutine to execute
+        :param operation: Name/type of operation (for error message)
+        :param timeout: Override default timeout (None = use self._llm_timeout)
+        :return: The coroutine result
+        :raises TimeoutError: If operation times out
+        """
+        effective_timeout = timeout if timeout is not None else self._llm_timeout
+
+        try:
+            return await asyncio.wait_for(coro, timeout=effective_timeout)
+        except TimeoutError:
+            raise TimeoutError(
+                f"{self.name}: {operation} timed out after {effective_timeout}s"
+            ) from None
 
     async def execute(self, task: Task) -> TaskResult:
         """Execute a task and return the result.

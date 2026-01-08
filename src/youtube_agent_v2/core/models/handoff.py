@@ -182,3 +182,73 @@ class PartialResult:
     def is_partial(self) -> bool:
         """Always True for PartialResult."""
         return True
+
+
+@dataclass
+class OperationTimeout:
+    """Context for a timed-out operation, enabling agents to reason about failures.
+
+    Instead of just raising TimeoutError, this provides structured context
+    that agents can use to decide how to proceed (retry, skip, use fallback, etc.).
+
+    Example usage in an agent:
+        result = await self._call_with_timeout(
+            self._client.get_response(prompt),
+            timeout=30.0,
+            operation="goal_reasoning",
+            context={"goal": goal, "partial_analysis": partial}
+        )
+        if isinstance(result, OperationTimeout):
+            # Agent can reason about the timeout and decide next steps
+            return HandoffResult.handoff(
+                intent=result.suggested_fallback or "Continue with partial results",
+                state={**state, "timeout_context": result.to_dict()}
+            )
+
+    :param operation: Name/type of the operation that timed out
+    :param timeout_seconds: How long we waited before timing out
+    :param context: Any relevant context available at timeout (inputs, partial results)
+    :param suggested_fallback: Optional suggestion for how to proceed
+    :param retryable: Whether this operation could reasonably be retried
+    """
+
+    operation: str
+    timeout_seconds: float
+    context: dict[str, Any] = field(default_factory=dict)
+    suggested_fallback: str | None = None
+    retryable: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for state passing.
+
+        :return: Dict representation suitable for JSON serialization
+        """
+        return {
+            "operation": self.operation,
+            "timeout_seconds": self.timeout_seconds,
+            "context": self.context,
+            "suggested_fallback": self.suggested_fallback,
+            "retryable": self.retryable,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OperationTimeout":
+        """Create from dictionary.
+
+        :param data: Dict with operation, timeout_seconds, etc.
+        :return: OperationTimeout instance
+        """
+        return cls(
+            operation=data.get("operation", "unknown"),
+            timeout_seconds=data.get("timeout_seconds", 0.0),
+            context=data.get("context", {}),
+            suggested_fallback=data.get("suggested_fallback"),
+            retryable=data.get("retryable", True),
+        )
+
+    def __str__(self) -> str:
+        """Human-readable description of the timeout."""
+        msg = f"Operation '{self.operation}' timed out after {self.timeout_seconds}s"
+        if self.suggested_fallback:
+            msg += f". Suggested: {self.suggested_fallback}"
+        return msg

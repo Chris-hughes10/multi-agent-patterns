@@ -38,6 +38,8 @@ class TaskGroup:
     :param state: Shared state to pass to join task
     :param results: Collected results from completed tasks
     :param parent_task_id: ID of task that triggered the fan-out
+    :param join_task_id: ID of the join task (set when posted)
+    :param _join_posted: Event signaled when join task is posted (internal)
     """
 
     id: str
@@ -47,6 +49,8 @@ class TaskGroup:
     parent_task_id: str
     results: dict[str, Any] = field(default_factory=dict)  # task_id -> result
     errors: list[str] = field(default_factory=list)
+    join_task_id: str | None = field(default=None)
+    _join_posted: asyncio.Event = field(default_factory=asyncio.Event)
 
     @property
     def is_complete(self) -> bool:
@@ -57,6 +61,26 @@ class TaskGroup:
     def collected_results(self) -> list[Any]:
         """Get results as a list (order not guaranteed)."""
         return list(self.results.values())
+
+    def signal_join_posted(self, join_task_id: str) -> None:
+        """Signal that the join task has been posted.
+
+        :param join_task_id: ID of the posted join task
+        """
+        self.join_task_id = join_task_id
+        self._join_posted.set()
+
+    async def wait_for_join(self, timeout: float | None = None) -> str | None:
+        """Wait for the join task to be posted.
+
+        :param timeout: Max time to wait in seconds
+        :return: Join task ID, or None if timeout
+        """
+        try:
+            await asyncio.wait_for(self._join_posted.wait(), timeout=timeout)
+            return self.join_task_id
+        except TimeoutError:
+            return None
 
 
 class SelfSelectingPool:
@@ -480,6 +504,10 @@ class SelfSelectingPool:
         )
 
         await self._registry.submit_async(join_task)
+
+        # Signal waiters that join task is ready (event-driven notification)
+        group.signal_join_posted(join_task.id)
+
         logger.info(
             "Posted join task %s for group %s: %s -> %s (results: %d, errors: %d)",
             join_task.id[:8],
@@ -490,12 +518,11 @@ class SelfSelectingPool:
             len(group.errors),
         )
 
-        # Clean up the group
+        # Clean up the group (but keep reference for waiters to access join_task_id)
         async with self._groups_lock:
-            if group.id in self._task_groups:
-                del self._task_groups[group.id]
             for task_id in group.task_ids:
                 self._task_to_group.pop(task_id, None)
+            # Note: Don't delete from _task_groups yet - waiters may need it
 
     async def submit_and_wait(
         self,
@@ -735,33 +762,57 @@ class SelfSelectingPool:
         group_id: str,
         timeout: float | None = None,
     ) -> Task | None:
-        """Find the join task for a completed group.
+        """Find the join task for a completed group (event-driven).
+
+        Uses the TaskGroup's event to wait for join task notification
+        instead of polling, resulting in zero CPU usage while waiting.
 
         :param group_id: ID of the task group
         :param timeout: Max time to wait
         :return: The join task or None
         """
-        import time
+        # Get the group to access its event
+        async with self._groups_lock:
+            group = self._task_groups.get(group_id)
 
-        start_time = time.time()
-        poll_interval = 0.1
+        if not group:
+            # Group not found - try queue scan as fallback
+            return await self._scan_queue_for_join_task(group_id)
 
-        while True:
-            # Look for a task with from_group matching group_id
-            queue = self._registry.task_queue
-            async with queue._lock:
-                for task in queue._pending.values():
-                    if task.context.get("from_group") == group_id:
-                        return task
-                # Also check completed tasks
-                for task in queue._completed.values():
-                    if task.context.get("from_group") == group_id:
-                        return task
+        # Wait for join task notification (event-driven, no polling)
+        join_task_id = await group.wait_for_join(timeout=timeout)
 
-            if timeout and time.time() - start_time >= timeout:
-                return None
+        if not join_task_id:
+            return None
 
-            await asyncio.sleep(poll_interval)
+        # Retrieve the actual task from the queue
+        queue = self._registry.task_queue
+        async with queue._lock:
+            task = queue._pending.get(join_task_id) or queue._completed.get(join_task_id)
+
+        # Clean up the group now that we've retrieved the join task
+        async with self._groups_lock:
+            self._task_groups.pop(group_id, None)
+
+        return task
+
+    async def _scan_queue_for_join_task(self, group_id: str) -> Task | None:
+        """Fallback: scan queue for join task by group_id.
+
+        Used when the group is not in _task_groups (e.g., already cleaned up).
+
+        :param group_id: ID of the task group
+        :return: The join task or None
+        """
+        queue = self._registry.task_queue
+        async with queue._lock:
+            for task in queue._pending.values():
+                if task.context.get("from_group") == group_id:
+                    return task
+            for task in queue._completed.values():
+                if task.context.get("from_group") == group_id:
+                    return task
+        return None
 
     async def _find_handoff_task(
         self,

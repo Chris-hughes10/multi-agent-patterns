@@ -85,9 +85,14 @@ class SynthesizerAgent:
     Uses the same pool methods that agents use for fan-out operations,
     ensuring consistent behavior throughout the system.
 
+    Supports two modes:
+    - CLI mode (default): Creates and destroys pool per request
+    - Service mode: Uses an external shared pool for efficiency
+
     :param registry: Agent registry for finding capable agents
     :param client: Optional chat client for response synthesis
     :param timeout: Default timeout for requests in seconds
+    :param pool: Optional external pool for service mode (reused across requests)
     """
 
     def __init__(
@@ -95,17 +100,20 @@ class SynthesizerAgent:
         registry: "AgentRegistry",
         client: AzureOpenAIChatClient | None = None,
         timeout: float = 120.0,
+        pool: SelfSelectingPool | None = None,
     ) -> None:
         """Initialize the synthesizer.
 
         :param registry: Registry of available agents
         :param client: Optional chat client
         :param timeout: Default request timeout
+        :param pool: Optional external pool (if provided, won't be shutdown after requests)
         """
         self._registry = registry
         self._client = client or get_chat_client()
         self._timeout = timeout
         self._chat_agent: ChatAgent | None = None
+        self._external_pool = pool  # None = create per request (CLI mode)
 
     @property
     def name(self) -> str:
@@ -122,6 +130,26 @@ class SynthesizerAgent:
                 tools=[],
             )
         return self._chat_agent
+
+    async def _get_pool(self) -> tuple[SelfSelectingPool, bool]:
+        """Get or create the pool for request processing.
+
+        Returns a tuple of (pool, should_shutdown):
+        - External pool: Returns the shared pool, should_shutdown=False
+        - CLI mode: Creates a new pool, should_shutdown=True
+
+        :return: Tuple of (pool instance, whether to shutdown after use)
+        """
+        if self._external_pool is not None:
+            # Service mode: use external pool, don't shutdown
+            if not self._external_pool.is_running:
+                await self._external_pool.start()
+            return self._external_pool, False
+
+        # CLI mode: create per-request pool
+        pool = SelfSelectingPool(self._registry)
+        await pool.start()
+        return pool, True
 
     async def process_request(
         self,
@@ -142,9 +170,8 @@ class SynthesizerAgent:
         # Analyze request for parallelism
         analysis = await self._analyze_request(user_request)
 
-        # Create and start pool
-        pool = SelfSelectingPool(self._registry)
-        await pool.start()
+        # Get pool (creates new one in CLI mode, reuses in service mode)
+        pool, should_shutdown = await self._get_pool()
 
         try:
             if analysis.has_parallelism:
@@ -164,7 +191,8 @@ class SynthesizerAgent:
                     timeout=request_timeout,
                 )
         finally:
-            await pool.shutdown(wait=True, timeout=5.0)
+            if should_shutdown:
+                await pool.shutdown(wait=True, timeout=5.0)
 
         # Convert TaskResult to HandoffResult/PartialResult for synthesis
         if result.success:
