@@ -1,21 +1,27 @@
-"""Main CLI entry point for the YouTube Agent system."""
+"""Driver module - shared logic for CLI and programmatic usage.
 
-import argparse
-import asyncio
+This module provides the core driver functions that can be used by:
+- CLI commands
+- E2E tests
+- Programmatic API consumers
+"""
+
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from youtube_agent_orchestrator.agents.orchestrator import create_orchestrator
-from youtube_agent_orchestrator.application.status import setup_status_monitoring
-from youtube_agent_orchestrator.models.config import get_runtime_config
+from youtube_agent_orchestrator.agents.orchestrator import (
+    OrchestratorAgent,
+    create_orchestrator,
+)
+from youtube_agent_orchestrator.models.storage import StoredTranscript
+from youtube_agent_orchestrator.models.transcript import TranscriptResult
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import fetch_transcript
 from youtube_agent_orchestrator.tools.search import search_youtube_formatted
 from youtube_agent_orchestrator.tools.summarize import summarize_video
 
-logger = logging.getLogger("youtube_agent")
+logger = logging.getLogger("youtube_agent_orchestrator.driver")
 
 
 def setup_logging(debug: bool = False) -> str | None:
@@ -60,197 +66,102 @@ def setup_logging(debug: bool = False) -> str | None:
     return str(log_file_path) if log_file_path else None
 
 
-def cmd_search(args: argparse.Namespace) -> None:
-    """Handle search command."""
-    result = search_youtube_formatted(args.query, args.max_results)
-    print(result)
+async def process_request(
+    request: str,
+    orchestrator: OrchestratorAgent | None = None,
+) -> str:
+    """Process a user request through the orchestrator agent system.
+
+    This is the main driver function that handles:
+    - Creating the orchestrator (if not provided)
+    - Processing the request
+    - Returning the response
+
+    :param request: Natural language user request
+    :param orchestrator: Optional pre-created orchestrator (creates new if None)
+    :return: Response string from the orchestrator
+    """
+    if orchestrator is None:
+        orchestrator = create_orchestrator()
+
+    return await orchestrator.run(request)
 
 
-def cmd_transcript(args: argparse.Namespace) -> None:
-    """Handle transcript command."""
-    try:
-        result = fetch_transcript(args.video)
-        print(f"Title: {result.metadata.title}")
-        print(f"Channel: {result.metadata.channel}")
-        print(f"Duration: {result.transcript.duration_seconds:.0f} seconds")
-        print(f"\n{result.transcript.full_text}")
+def search_videos(query: str, max_results: int = 5) -> str:
+    """Search YouTube for videos matching the query.
 
-        if args.save:
-            storage = TranscriptStorage()
-            storage.save(result)
-            print(f"\n(Saved to data/transcripts/{result.metadata.video_id}.json)")
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    :param query: Search query string
+    :param max_results: Maximum number of results to return
+    :return: Formatted search results string
+    """
+    return search_youtube_formatted(query, max_results)
 
 
-def cmd_summarize(args: argparse.Namespace) -> None:
-    """Handle summarize command."""
-    try:
-        result = summarize_video(args.video, save=not args.no_save)
-        print(f"Title: {result.metadata.title}")
-        print(f"Channel: {result.metadata.channel}")
-        print(f"\nSummary:\n{result.summary}")
-        if not args.no_save:
-            print(f"\n(Saved with ID: {result.video_id})")
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+def get_transcript(video: str, save: bool = False) -> TranscriptResult:
+    """Fetch transcript for a YouTube video.
+
+    :param video: YouTube video URL or ID
+    :param save: Whether to save the transcript to storage
+    :return: TranscriptResult with metadata and transcript
+    """
+    result = fetch_transcript(video)
+
+    if save:
+        storage = TranscriptStorage()
+        storage.save(result)
+
+    return result
 
 
-def cmd_list(_args: argparse.Namespace) -> None:
-    """Handle list command."""
+def get_summary(video: str, save: bool = True) -> StoredTranscript:
+    """Fetch transcript and generate summary for a YouTube video.
+
+    :param video: YouTube video URL or ID
+    :param save: Whether to save to storage
+    :return: StoredTranscript with summary
+    """
+    return summarize_video(video, save=save)
+
+
+def list_stored_transcripts() -> list[dict]:
+    """List all stored transcripts.
+
+    :return: List of dicts with video_id, title, and has_summary
+    """
     storage = TranscriptStorage()
     video_ids = storage.list_videos()
 
-    if not video_ids:
-        print("No transcripts stored yet.")
-        return
-
-    print(f"Stored transcripts ({len(video_ids)} total):\n")
+    results = []
     for vid in video_ids:
         stored = storage.load(vid)
         if stored:
-            title = stored.metadata.title or "Unknown"
-            has_summary = "yes" if stored.summary else "no"
-            print(f"  {vid}: {title} [summary: {has_summary}]")
+            results.append({
+                "video_id": vid,
+                "title": stored.metadata.title or "Unknown",
+                "has_summary": bool(stored.summary),
+            })
+
+    return results
 
 
-def cmd_lookup(args: argparse.Namespace) -> None:
-    """Handle lookup command."""
+def lookup_transcript(video_id: str) -> StoredTranscript | None:
+    """Look up a stored transcript by video ID.
+
+    :param video_id: YouTube video ID
+    :return: StoredTranscript if found, None otherwise
+    """
     storage = TranscriptStorage()
-    stored = storage.load(args.video_id)
-
-    if stored is None:
-        print(f"No stored transcript found for: {args.video_id}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Title: {stored.metadata.title}")
-    print(f"Channel: {stored.metadata.channel}")
-    print(f"Stored at: {stored.stored_at}")
-
-    if stored.summary:
-        print(f"\nSummary:\n{stored.summary}")
-
-    print(f"\nTranscript:\n{stored.transcript.full_text}")
+    return storage.load(video_id)
 
 
-def cmd_chat(args: argparse.Namespace) -> None:
-    """Handle chat command."""
-    orchestrator = create_orchestrator()
-
-    async def run_interactive() -> None:
-        print("YouTube Research Agent")
-        print("=" * 50)
-        print("I can help you search, fetch transcripts, and summarize YouTube videos.")
-        print("Type 'exit' or 'quit' to stop.\n")
-
-        while True:
-            try:
-                user_input = input("You: ").strip()
-
-                if not user_input:
-                    continue
-
-                if user_input.lower() in ("exit", "quit"):
-                    print("Goodbye!")
-                    break
-
-                print("\nAgent: ", end="", flush=True)
-                response = await orchestrator.run(user_input)
-                print(response)
-                print()
-
-            except KeyboardInterrupt:
-                print("\nGoodbye!")
-                break
-            except Exception as e:
-                print(f"\nError: {e}\n", file=sys.stderr)
-
-    async def run_single(request: str) -> None:
-        response = await orchestrator.run(request)
-        print(response)
-
-    if args.request:
-        asyncio.run(run_single(args.request))
-    else:
-        asyncio.run(run_interactive())
-
-
-def main() -> None:
-    """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        prog="youtube-agent",
-        description="YouTube Agent - search, fetch transcripts, summarize, and research videos",
-    )
-    parser.add_argument(
-        "--debug", action="store_true", help="Enable debug logging to see what's happening"
-    )
-    parser.add_argument("--status", action="store_true", help="Show human-friendly status updates")
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # search command
-    search_parser = subparsers.add_parser("search", help="Search YouTube for videos")
-    search_parser.add_argument("query", help="Search query")
-    search_parser.add_argument(
-        "-n", "--max-results", type=int, default=5, help="Maximum results (default: 5)"
-    )
-    search_parser.set_defaults(func=cmd_search)
-
-    # transcript command
-    transcript_parser = subparsers.add_parser("transcript", help="Fetch transcript for a video")
-    transcript_parser.add_argument("video", help="YouTube video URL or ID")
-    transcript_parser.add_argument(
-        "--save", action="store_true", help="Save transcript to data/transcripts/"
-    )
-    transcript_parser.set_defaults(func=cmd_transcript)
-
-    # summarize command
-    summarize_parser = subparsers.add_parser("summarize", help="Summarize a video")
-    summarize_parser.add_argument("video", help="YouTube video URL or ID")
-    summarize_parser.add_argument("--no-save", action="store_true", help="Don't save to storage")
-    summarize_parser.set_defaults(func=cmd_summarize)
-
-    # list command
-    list_parser = subparsers.add_parser("list", help="List stored transcripts")
-    list_parser.set_defaults(func=cmd_list)
-
-    # lookup command
-    lookup_parser = subparsers.add_parser("lookup", help="Look up a stored transcript")
-    lookup_parser.add_argument("video_id", help="Video ID to look up")
-    lookup_parser.set_defaults(func=cmd_lookup)
-
-    # chat command
-    chat_parser = subparsers.add_parser("chat", help="Interactive chat with the orchestrator agent")
-    chat_parser.add_argument(
-        "request", nargs="?", help="Single request (interactive if not provided)"
-    )
-    chat_parser.add_argument(
-        "--no-store", action="store_true", help="Don't auto-save transcripts to storage"
-    )
-    chat_parser.set_defaults(func=cmd_chat)
-
-    args = parser.parse_args()
-    log_file = setup_logging(args.debug)
-    if log_file:
-        print(f"Debug logs: {log_file}")
-
-    # Always enable human-friendly status updates
-    setup_status_monitoring()
-
-    # Configure auto-store based on --no-store flag (for chat command)
-    no_store = getattr(args, "no_store", False)
-    if no_store:
-        get_runtime_config().auto_store_transcripts = False
-
-    if args.command is None:
-        # Default to chat if no command specified
-        args.request = None
-        args.no_store = False  # Default value for interactive mode
-        cmd_chat(args)
-    else:
-        args.func(args)
-
-
-if __name__ == "__main__":
-    main()
+# Re-export create_orchestrator for convenience
+__all__ = [
+    "setup_logging",
+    "process_request",
+    "search_videos",
+    "get_transcript",
+    "get_summary",
+    "list_stored_transcripts",
+    "lookup_transcript",
+    "create_orchestrator",
+]

@@ -1,34 +1,36 @@
 # From Orchestrator to Autonomous: What Happens When Every Agent Thinks
 
-In Part 1, we built a YouTube research assistant with an orchestrator coordinating four specialized agents. The orchestrator received user requests, delegated to specialists, collected results, and synthesized responses. It worked well for conversational interactions.
+In Part 1, we built a YouTube research assistant with an orchestrator coordinating four specialized agents. The orchestrator received user requests, delegated to specialists, collected results, and synthesized responses. It worked - and for many use cases, it's the right pattern.
 
-But as our workflows grew more complex, we noticed a pattern: the orchestrator was becoming a bottleneck.
-
-```
-V1: User → Orchestrator → Agent A → Orchestrator → Agent B → Orchestrator → User
-```
-
-Every step routes through the center. The orchestrator's context grows with each round-trip. Adding new capabilities means updating the orchestrator's instructions. What if agents could coordinate directly?
+But I noticed something: almost every multi-agent example I encountered followed this same orchestrator pattern. A central coordinator, specialized workers, hub-and-spoke communication. It works, but is it the only way?
 
 ```
-V2: User → Agent A → Agent B → Agent C → User
+Orchestrator Pattern (what everyone does):
+User → Orchestrator → Agent A → Orchestrator → Agent B → Orchestrator → User
 ```
 
-This post explores the journey from centralized orchestration to autonomous agent coordination. We'll cover the patterns we explored, what worked, and the surprisingly simple insight that made it all click.
+I wanted to explore a different paradigm. What if agents could coordinate directly, without a central hub? What if each agent understood the overall goal and could decide for itself what should happen next?
+
+```
+Autonomous Pattern (emergent coordination):
+User → Agent A → Agent B → Agent C → User
+```
+
+This isn't necessarily *better* than orchestration - it's a different set of tradeoffs. But it's worth understanding, because it opens up patterns that are harder to achieve with central coordination: natural parallelism, adaptive workflows, and agents that respond to what they find rather than following a predetermined script.
 
 ## In this article, we shall cover:
 
-- Why centralized orchestration becomes a bottleneck for complex workflows
-- How to design agents that reason about goals, not just execute commands
+- Why the orchestrator pattern dominates multi-agent examples (and when it's the right choice)
+- An alternative: agents that reason about goals and hand off to each other
 - Implementing event-driven coordination with zero polling overhead
 - Parallel execution patterns with decentralized fan-out/fan-in
-- When to use orchestration vs autonomous patterns
+- How to choose between orchestration and autonomous patterns
 
 ---
 
-## The Orchestrator's Limitation
+## Understanding the Orchestrator Pattern
 
-The orchestrator pattern from Part 1 has a fundamental constraint: **the coordinator sees every step**.
+Before exploring alternatives, it's worth understanding why the orchestrator pattern is so common - and where its tradeoffs lie.
 
 Consider a multi-step research task: "Find videos about Kamado cooking, get their transcripts, summarize the key temperatures and times, and save to a markdown file."
 
@@ -45,16 +47,19 @@ With an orchestrator:
 9. WriterAgent → Orchestrator: "Saved to output/kamado_notes.md"
 10. Orchestrator → User: "Done! Here's your summary..."
 
-The orchestrator participates in every exchange. Its context window accumulates all intermediate results. For complex workflows, this becomes expensive - both in tokens and in the cognitive load of maintaining coherent reasoning across many steps.
+This works well. The orchestrator has full visibility, can handle errors gracefully, and maintains conversational context. For interactive, conversational applications, it's often the right choice.
 
-We explored several alternatives:
+But the pattern has characteristics worth noting:
+- **The coordinator sees everything**: Context accumulates at the center
+- **Sequential by default**: Parallelism requires explicit orchestrator logic
+- **Central coupling**: Adding new agents means updating the orchestrator
+
+I explored several alternative patterns:
 - **Dispatcher pattern**: A router that assigns tasks but doesn't coordinate results
 - **Capability-based routing**: Match tasks to agents by declared capabilities
 - **Explicit planning**: An LLM generates a DAG of steps upfront
 
-Each had merits, but they also had complexity. The dispatcher still needed to understand all agents. Capability matching broke down for ambiguous intents. Planning required re-planning when things changed.
-
-The insight that simplified everything: **give every agent the goal, and let them decide what's next**.
+Each had merits, but they also had complexity. Eventually, a simpler insight emerged: **what if every agent understood the goal and could decide what happens next?**
 
 ---
 
