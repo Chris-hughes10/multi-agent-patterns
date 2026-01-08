@@ -26,30 +26,30 @@ Unlike V1's orchestrator (where a central LLM coordinates every step), V2 agents
 | **Parallel task execution** | **Working** | Decentralized fan-out/fan-in via pool |
 | **Request analysis** | **Working** | LLM detects parallelism opportunities |
 
-### Architecture
+### Architecture (DDD Layout)
 
 ```
 src/youtube_autonomous_agents/
-├── core/
-│   ├── base_agent.py      # BaseAgent ABC with execute_autonomous()
-│   ├── registry.py        # AgentRegistry for discovery
-│   ├── task_queue.py      # Event-driven AsyncTaskQueue
-│   ├── session.py         # Conversation state + variable resolution
-│   ├── intent_router.py   # LLM-based intent routing
-│   ├── loop_detector.py   # Cycle detection
-│   └── models/
-│       ├── task.py        # Task, TaskResult, TaskStatus
-│       └── handoff.py     # HandoffResult (complete/handoff/fan_out)
-├── agents/
-│   ├── search.py          # SearchAgent
-│   ├── transcript.py      # TranscriptAgent
-│   ├── summarize.py       # SummarizeAgent
-│   ├── writer.py          # WriterAgent
-│   └── synthesizer.py     # Entry point + parallelism coordination
-├── patterns/
-│   └── self_selection.py  # SelfSelectingPool coordination
-└── cli/
-    └── main.py            # CLI entry point
+├── agents/               # Domain layer
+│   ├── base.py           # BaseAgent ABC with execute_autonomous()
+│   ├── search.py         # SearchAgent
+│   ├── transcript.py     # TranscriptAgent
+│   ├── summarize.py      # SummarizeAgent
+│   ├── writer.py         # WriterAgent
+│   └── synthesizer.py    # Entry point + parallelism coordination
+├── application/          # Application layer
+│   ├── cli.py            # CLI entry point
+│   └── main.py           # Shared driver functions
+├── infra/                # Infrastructure layer
+│   ├── pool.py           # SelfSelectingPool coordination
+│   ├── registry.py       # AgentRegistry for discovery
+│   ├── task_queue.py     # Event-driven AsyncTaskQueue
+│   ├── session.py        # Conversation state + variable resolution
+│   ├── intent_router.py  # LLM-based intent routing
+│   └── loop_detector.py  # Cycle detection
+└── models/               # Shared kernel
+    ├── task.py           # Task, TaskResult, TaskStatus
+    └── handoff.py        # HandoffResult (complete/handoff/fan_out)
 ```
 
 ---

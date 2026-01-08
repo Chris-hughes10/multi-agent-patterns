@@ -37,7 +37,7 @@ dev = [
 ]
 
 [project.scripts]
-youtube-agent = "youtube_agent_orchestrator.cli.main:main"
+youtube-agent = "youtube_agent_orchestrator.application.main:main"
 youtube-autonomous = "youtube_autonomous_agents.application.cli:main"
 youtube-agent-planner = "youtube_agent_planner.cli.main:main"
 

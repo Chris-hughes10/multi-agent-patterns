@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from youtube_agent_orchestrator.agents.orchestrator import create_orchestrator
-from youtube_agent_orchestrator.cli.status import setup_status_monitoring
+from youtube_agent_orchestrator.application.status import setup_status_monitoring
 from youtube_agent_orchestrator.models.config import get_runtime_config
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import fetch_transcript
