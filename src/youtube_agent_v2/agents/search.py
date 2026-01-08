@@ -1,5 +1,6 @@
 """SearchAgent - YouTube video search specialist."""
 
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
@@ -10,6 +11,8 @@ from youtube_agent.tools.search import search_youtube_structured
 from youtube_agent_v2.core.base_agent import BaseAgent
 from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
 from youtube_agent_v2.core.models.task import Task, TaskResult, TaskStatus
+
+logger = logging.getLogger(__name__)
 
 SEARCH_INSTRUCTIONS = """You are a YouTube Search Agent. Your job is to find relevant YouTube videos based on user queries.
 
@@ -115,6 +118,38 @@ class SearchAgent(BaseAgent):
         :param state: Accumulated state from previous agents
         :return: HandoffResult (complete or handoff) or PartialResult on error
         """
+        # Check if we already have videos from parallel_results (join task recovery)
+        # This handles cases where a join task is misrouted to search
+        if "parallel_results" in state:
+            parallel_results = state["parallel_results"]
+            # Interleave videos from different searches to ensure diversity
+            # (e.g., get 1 from Fork & Embers, 1 from Chuds BBQ, etc.)
+            video_lists = [
+                result["results"]
+                for result in parallel_results
+                if isinstance(result, dict) and "results" in result
+            ]
+            all_videos = self._interleave_videos(video_lists)
+            if all_videos:
+                logger.info(
+                    "Found %d videos in parallel_results, passing through (skipping search)",
+                    len(all_videos),
+                )
+                output = {
+                    "query": "(from parallel searches)",
+                    "count": len(all_videos),
+                    "results": all_videos,
+                }
+                # Reason about goal with existing results
+                reasoning = await self._reason_about_goal(goal, output)
+                if reasoning["satisfied"]:
+                    return HandoffResult.complete(output)
+                else:
+                    return HandoffResult.handoff(
+                        intent=reasoning["next_step"],
+                        state={**state, "search": output, "videos": all_videos},
+                    )
+
         # Extract query from state or goal
         query = state.get("query")
         if not query:
@@ -122,6 +157,7 @@ class SearchAgent(BaseAgent):
         max_results = state.get("max_results", 5)
 
         try:
+            logger.info("Searching YouTube for: %s", query)
             results = await search_youtube(query, max_results)
 
             output = {
@@ -140,33 +176,90 @@ class SearchAgent(BaseAgent):
                 ],
             }
 
-            # Reason about what's needed next based on the goal
-            goal_lower = goal.lower()
-            needs_transcript = any(
-                kw in goal_lower
-                for kw in ["transcript", "text", "words", "said", "spoken", "captions"]
-            )
-            needs_summary = any(
-                kw in goal_lower
-                for kw in ["summarize", "summary", "key points", "main ideas", "analyze"]
-            )
+            # Log found videos
+            logger.info("Found %d videos:", len(results))
+            for video in results[:5]:
+                logger.info("  - [%s] %s (%s)", video.video_id, video.title, video.channel)
 
-            if needs_transcript or needs_summary:
-                # Goal needs more than search - hand off
-                intent = "Get transcripts for these videos"
-                if needs_summary:
-                    intent += " and summarize them"
+            # If this is a parallel task, always complete with results
+            # (the join task will continue the chain)
+            if state.get("is_parallel_task"):
+                logger.info("Parallel task - completing with results (join will continue chain)")
+                return HandoffResult.complete(output)
 
+            # Use LLM to reason about whether the goal is satisfied
+            reasoning = await self._reason_about_goal(goal, output)
+
+            if reasoning["satisfied"]:
+                return HandoffResult.complete(output)
+            else:
                 return HandoffResult.handoff(
-                    intent=intent,
+                    intent=reasoning["next_step"],
                     state={**state, "search": output, "videos": output["results"]},
                 )
 
-            # Goal is satisfied with just search results
-            return HandoffResult.complete(output)
-
         except Exception as e:
             return PartialResult(error=f"Search failed: {e}", partial_data=state)
+
+    async def _reason_about_goal(
+        self, goal: str, search_results: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Use LLM to reason about whether the goal is satisfied.
+
+        :param goal: Original user request
+        :param search_results: The search results we found
+        :return: Dict with 'satisfied' (bool) and 'next_step' (str if not satisfied)
+        """
+        video_titles = [r["title"] for r in search_results.get("results", [])[:3]]
+
+        prompt = f"""You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Searched YouTube and found these videos:
+{chr(10).join(f'- {title}' for title in video_titles)}
+
+QUESTION: Is the user's goal satisfied by just having these video links, or do they need more?
+
+Consider:
+- If they just want to find/discover videos → goal is SATISFIED
+- If they want specific information FROM the videos (temperatures, steps, details, etc.) → need TRANSCRIPTS
+- If they want analysis, summaries, or key points → need TRANSCRIPTS then SUMMARIZATION
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if not satisfied) describe what needs to happen next
+
+Example responses:
+SATISFIED: yes
+NEXT_STEP: none
+
+SATISFIED: no
+NEXT_STEP: Get transcripts from these videos and extract the specific cooking temperatures and times the user asked for"""
+
+        try:
+            client = get_chat_client()
+            response = await client.get_response(prompt)
+            text = response.text.strip()
+
+            # Parse the response
+            text_lower = text.lower()
+            satisfied = "satisfied: yes" in text_lower or "satisfied:yes" in text_lower
+
+            next_step = "Get transcripts for these videos and analyze them"
+            if "NEXT_STEP:" in text:
+                next_step = text.split("NEXT_STEP:")[-1].strip()
+                if next_step.lower() == "none":
+                    next_step = ""
+
+            return {"satisfied": satisfied, "next_step": next_step}
+
+        except Exception:
+            # On error, default to handing off (safer to do more work than less)
+            return {
+                "satisfied": False,
+                "next_step": "Get transcripts for these videos to extract detailed information",
+            }
 
     async def _extract_query_from_goal(self, goal: str) -> str:
         """Extract search query from natural language goal using LLM.
@@ -241,3 +334,28 @@ Search query:"""
                 break
 
         return query
+
+    def _interleave_videos(self, video_lists: list[list[dict]]) -> list[dict]:
+        """Interleave videos from multiple search results for diversity.
+
+        Instead of [A1, A2, A3, B1, B2, B3], produces [A1, B1, A2, B2, A3, B3].
+        This ensures that when we fetch only N transcripts, we get videos
+        from multiple searches rather than all from one.
+
+        :param video_lists: List of video lists from different searches
+        :return: Interleaved list of videos
+        """
+        if not video_lists:
+            return []
+        if len(video_lists) == 1:
+            return video_lists[0]
+
+        interleaved = []
+        max_len = max(len(vl) for vl in video_lists)
+
+        for i in range(max_len):
+            for video_list in video_lists:
+                if i < len(video_list):
+                    interleaved.append(video_list[i])
+
+        return interleaved

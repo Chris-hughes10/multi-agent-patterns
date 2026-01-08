@@ -1,23 +1,18 @@
-"""V2 CLI entry point with multi-agent patterns."""
+"""V2 CLI entry point with unified autonomous + self-selection pattern."""
 
 import asyncio
-import contextlib
 import logging
 import sys
-from enum import Enum
 
 import click
 
 from youtube_agent_v2.agents import (
     SearchAgent,
     SummarizeAgent,
-    SynthesizerAgent,
     TranscriptAgent,
     WriterAgent,
 )
 from youtube_agent_v2.core import AgentRegistry, TaskResult
-from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
-from youtube_agent_v2.patterns.dispatcher import DispatcherCoordinator
 from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
 
 # Configure logging
@@ -26,19 +21,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("youtube_agent_v2.cli")
-
-
-class Pattern(str, Enum):
-    """Available multi-agent patterns."""
-
-    DISPATCHER = "dispatcher"
-    SELF_SELECTION = "self-selection"
-    PLANNER = "planner"
-    AUTONOMOUS = "autonomous"
-
-
-# Global pattern setting (set by CLI group)
-_current_pattern: Pattern = Pattern.DISPATCHER
 
 
 def create_registry() -> AgentRegistry:
@@ -63,53 +45,25 @@ def create_registry() -> AgentRegistry:
     return registry
 
 
-async def run_with_dispatcher(
-    registry: AgentRegistry,
+async def run_task(
     description: str,
     capabilities: list[str],
     context: dict | None = None,
-) -> TaskResult:
-    """Run a task using the dispatcher pattern.
+) -> None:
+    """Run a task using the unified autonomous + self-selection pattern.
 
-    :param registry: Agent registry
     :param description: Task description
     :param capabilities: Required capabilities
     :param context: Optional context dict
-    :return: TaskResult
     """
-    dispatcher = DispatcherCoordinator(registry)
-    dispatch_task = asyncio.create_task(dispatcher.run(max_concurrent=3))
+    registry = create_registry()
 
-    try:
-        result = await dispatcher.submit_and_wait(
-            description=description,
-            capabilities=capabilities,
-            context=context or {},
-            timeout=120.0,
-        )
-        return result
+    logger.info("Submitting task: %s", description)
+    logger.info("Required capabilities: %s", capabilities)
 
-    finally:
-        await dispatcher.shutdown(wait=True)
-        dispatch_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await dispatch_task
+    click.echo("[Autonomous] Starting agent chain...")
 
-
-async def run_with_self_selection(
-    registry: AgentRegistry,
-    description: str,
-    capabilities: list[str],
-    context: dict | None = None,
-) -> TaskResult:
-    """Run a task using the self-selection pattern.
-
-    :param registry: Agent registry
-    :param description: Task description
-    :param capabilities: Required capabilities
-    :param context: Optional context dict
-    :return: TaskResult
-    """
+    # Use the unified pattern: event-driven self-selection with autonomous handoffs
     pool = SelfSelectingPool(registry)
     await pool.start()
 
@@ -120,174 +74,31 @@ async def run_with_self_selection(
             context=context or {},
             timeout=120.0,
         )
-        return result
+
+        if result.success:
+            click.echo("\n" + "=" * 60)
+            click.echo("RESULT:")
+            click.echo("=" * 60)
+            click.echo(result.data)
+        else:
+            click.echo(f"\nTask failed: {result.error}", err=True)
+            sys.exit(1)
 
     finally:
         await pool.shutdown(wait=True)
 
 
-async def run_with_planner(
-    registry: AgentRegistry,
-    description: str,
-) -> TaskResult:
-    """Run a task using the planner + DAG pattern.
-
-    The Planner creates an execution DAG, then the DAGExecutor
-    runs it with parallel execution and dependency tracking.
-
-    :param registry: Agent registry
-    :param description: Natural language task description
-    :return: TaskResult
-    """
-    from youtube_agent_v2.agents.planner import PlannerAgent
-
-    click.echo("[Planning...] Creating execution plan", nl=False)
-
-    # Preview the plan first
-    planner = PlannerAgent(registry=registry)
-    try:
-        dag = await planner.create_plan(description)
-        click.echo(f" ✓ ({len(dag.steps)} steps)")
-
-        # Show the plan
-        click.echo(f"[Plan] Goal: {dag.goal}")
-        for step in dag.steps:
-            deps = f" (after: {', '.join(step.depends_on)})" if step.depends_on else ""
-            click.echo(f"  → {step.id}: {step.description}{deps}")
-
-        click.echo("[Executing...] Running DAG")
-
-    except ValueError as e:
-        click.echo(f" ✗ Failed: {e}")
-        return TaskResult(success=False, error=str(e))
-
-    # Execute through synthesizer
-    synthesizer = SynthesizerAgent(registry=registry)
-
-    result = await synthesizer.process_request(
-        user_request=description,
-        pattern="planner",
-    )
-
-    if isinstance(result, PartialResult):
-        return TaskResult(
-            success=False,
-            error=result.error or "Planner execution failed",
-            data=result.partial_data,
-        )
-    elif isinstance(result, HandoffResult):
-        return TaskResult(
-            success=True,
-            data=result.result,
-        )
-    else:
-        # String response from synthesizer
-        return TaskResult(
-            success=True,
-            data=result,
-        )
-
-
-async def run_with_autonomous(
-    registry: AgentRegistry,
-    description: str,
-) -> TaskResult:
-    """Run a task using the autonomous pattern.
-
-    Agents receive the goal and accumulated state, reason about what
-    to do next, and hand off to each other until the goal is satisfied.
-
-    :param registry: Agent registry
-    :param description: Natural language task description
-    :return: TaskResult
-    """
-    click.echo("[Autonomous] Starting agent chain...")
-
-    synthesizer = SynthesizerAgent(registry=registry)
-
-    result = await synthesizer.process_request(
-        user_request=description,
-        pattern="autonomous",
-    )
-
-    # Show execution path
-    path_summary = synthesizer.session.get_path_summary()
-    if path_summary:
-        click.echo(f"[Path] {path_summary}")
-
-    if isinstance(result, PartialResult):
-        return TaskResult(
-            success=False,
-            error=result.error or "Autonomous execution failed",
-            data=result.partial_data,
-        )
-    elif isinstance(result, HandoffResult):
-        return TaskResult(success=True, data=result.result)
-    else:
-        # String response from synthesizer
-        return TaskResult(success=True, data=result)
-
-
-async def run_task(
-    description: str,
-    capabilities: list[str],
-    context: dict | None = None,
-) -> None:
-    """Run a task using the currently selected pattern.
-
-    :param description: Task description
-    :param capabilities: Required capabilities
-    :param context: Optional context dict
-    """
-    registry = create_registry()
-
-    logger.info("Using pattern: %s", _current_pattern.value)
-    logger.info("Submitting task: %s", description)
-    logger.info("Required capabilities: %s", capabilities)
-
-    if _current_pattern == Pattern.DISPATCHER:
-        result = await run_with_dispatcher(registry, description, capabilities, context)
-    elif _current_pattern == Pattern.SELF_SELECTION:
-        result = await run_with_self_selection(registry, description, capabilities, context)
-    elif _current_pattern == Pattern.PLANNER:
-        result = await run_with_planner(registry, description)
-    else:  # Pattern.AUTONOMOUS
-        result = await run_with_autonomous(registry, description)
-
-    if result.success:
-        click.echo("\n" + "=" * 60)
-        click.echo(f"RESULT (via {_current_pattern.value}):")
-        click.echo("=" * 60)
-        click.echo(result.data)
-    else:
-        click.echo(f"\nTask failed: {result.error}", err=True)
-        sys.exit(1)
-
-
 @click.group()
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
-@click.option(
-    "-p",
-    "--pattern",
-    type=click.Choice(["dispatcher", "self-selection", "planner", "autonomous"]),
-    default="dispatcher",
-    help="Multi-agent pattern to use (default: dispatcher)",
-)
-def cli(verbose: bool, pattern: str) -> None:
-    """YouTube Agent V2 - Multi-agent task processing.
+def cli(verbose: bool) -> None:
+    """YouTube Agent V2 - Autonomous multi-agent task processing.
 
-    Supports four coordination patterns:
-    - dispatcher: Central coordinator assigns tasks to agents
-    - self-selection: Agents autonomously claim tasks from queue
-    - planner: LLM creates execution DAG, then parallel execution
-    - autonomous: Agents reason about goals and hand off to each other
+    Uses event-driven self-selection with autonomous handoffs.
+    Agents reason about goals and hand off to each other via
+    a shared queue until the task is complete.
     """
-    global _current_pattern  # noqa: PLW0603
-
     if verbose:
         logging.getLogger("youtube_agent_v2").setLevel(logging.DEBUG)
-
-    _current_pattern = Pattern(pattern)
 
 
 @cli.command()
@@ -360,38 +171,6 @@ def agents() -> None:
     click.echo(f"All capabilities: {', '.join(registry.all_capabilities())}")
 
 
-@cli.command()
-def patterns() -> None:
-    """Show available multi-agent patterns."""
-    click.echo("\nAvailable Patterns:")
-    click.echo("-" * 40)
-
-    click.echo("\n  dispatcher (default):")
-    click.echo("    Central coordinator pulls tasks from queue")
-    click.echo("    and assigns them to capable agents.")
-    click.echo("    Good for: Controlled execution, simple selection logic")
-
-    click.echo("\n  self-selection:")
-    click.echo("    Agents autonomously watch queue and compete")
-    click.echo("    to claim tasks they can handle.")
-    click.echo("    Good for: Scalability, natural load balancing")
-
-    click.echo("\n  planner:")
-    click.echo("    An LLM Planner creates an execution DAG upfront,")
-    click.echo("    then DAGExecutor runs steps with dependency tracking.")
-    click.echo("    Supports parallel execution and re-planning on failure.")
-    click.echo("    Good for: Complex multi-step workflows, inspectable plans")
-
-    click.echo("\n  autonomous:")
-    click.echo("    Agents receive the goal and accumulated state,")
-    click.echo("    reason about what to do next, and hand off to each other")
-    click.echo("    until the goal is satisfied. No central planning.")
-    click.echo("    Good for: Adaptive execution, emergent workflows")
-
-    click.echo("\n" + "-" * 40)
-    click.echo("Usage: youtube-agent-v2 -p <pattern> <command>")
-
-
 def _infer_capabilities(user_input: str) -> list[str]:
     """Infer required capabilities from user input.
 
@@ -427,114 +206,21 @@ def chat(request: str | None) -> None:
 
         click.echo("\nYouTube Agent V2 - Interactive Mode")
         click.echo("=" * 50)
-        click.echo(f"Pattern: {_current_pattern.value}")
-        click.echo("Commands: search, transcript, summarize, write")
+        click.echo("Autonomous agents with event-driven self-selection.")
         click.echo("Type 'exit' or 'quit' to stop.\n")
 
-        # Set up the coordinator based on pattern
-        if _current_pattern == Pattern.DISPATCHER:
-            dispatcher = DispatcherCoordinator(registry)
-            dispatch_task = asyncio.create_task(dispatcher.run(max_concurrent=3))
+        # Use the unified pattern: event-driven self-selection with autonomous handoffs
+        pool = SelfSelectingPool(registry)
+        await pool.start()
 
-            async def submit(desc: str, caps: list[str]) -> TaskResult:
-                return await dispatcher.submit_and_wait(
-                    description=desc,
-                    capabilities=caps,
-                    context={},
-                    timeout=120.0,
-                )
-
-            async def cleanup() -> None:
-                await dispatcher.shutdown(wait=True)
-                dispatch_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await dispatch_task
-
-        elif _current_pattern == Pattern.SELF_SELECTION:
-            pool = SelfSelectingPool(registry)
-            await pool.start()
-
-            async def submit(desc: str, caps: list[str]) -> TaskResult:
-                return await pool.submit_and_wait(
-                    description=desc,
-                    capabilities=caps,
-                    context={},
-                    timeout=120.0,
-                )
-
-            async def cleanup() -> None:
-                await pool.shutdown(wait=True)
-
-        elif _current_pattern == Pattern.PLANNER:
-            synthesizer = SynthesizerAgent(registry=registry)
-
-            async def submit(desc: str, _caps: list[str]) -> TaskResult:
-                click.echo("[Planning...] Creating execution plan", nl=False)
-
-                # Create planner and get the plan
-                from youtube_agent_v2.agents.planner import PlannerAgent
-
-                planner = PlannerAgent(registry=registry)
-                try:
-                    dag = await planner.create_plan(desc)
-                    click.echo(f" ✓ ({len(dag.steps)} steps)")
-
-                    # Show the plan
-                    click.echo(f"[Plan] Goal: {dag.goal}")
-                    for step in dag.steps:
-                        deps = f" (after: {', '.join(step.depends_on)})" if step.depends_on else ""
-                        click.echo(f"  → {step.id}: {step.description}{deps}")
-
-                    click.echo("[Executing...] Running DAG")
-
-                except ValueError as e:
-                    click.echo(f" ✗ Failed: {e}")
-                    return TaskResult(success=False, error=str(e))
-
-                # Now run through synthesizer for full execution
-                result = await synthesizer.process_request(
-                    user_request=desc,
-                    pattern="planner",
-                )
-                if isinstance(result, PartialResult):
-                    return TaskResult(success=False, error=result.error, data=result.partial_data)
-                elif isinstance(result, HandoffResult):
-                    return TaskResult(success=True, data=result.result)
-                else:
-                    return TaskResult(success=True, data=result)
-
-            async def cleanup() -> None:
-                pass  # Synthesizer doesn't need cleanup
-
-        else:  # Pattern.AUTONOMOUS
-            synthesizer = SynthesizerAgent(registry=registry)
-
-            async def submit(desc: str, _caps: list[str]) -> TaskResult:
-                click.echo("[Autonomous] Starting agent chain...")
-
-                result = await synthesizer.process_request(
-                    user_request=desc,
-                    pattern="autonomous",
-                )
-
-                # Show execution path
-                path_summary = synthesizer.session.get_path_summary()
-                if path_summary:
-                    click.echo(f"[Path] {path_summary}")
-
-                if isinstance(result, PartialResult):
-                    return TaskResult(
-                        success=False,
-                        error=result.error,
-                        data=result.partial_data,
-                    )
-                elif isinstance(result, HandoffResult):
-                    return TaskResult(success=True, data=result.result)
-                else:
-                    return TaskResult(success=True, data=result)
-
-            async def cleanup() -> None:
-                pass  # Synthesizer doesn't need cleanup
+        async def submit(desc: str, caps: list[str]) -> TaskResult:
+            click.echo("[Autonomous] Starting agent chain...")
+            return await pool.submit_and_wait(
+                description=desc,
+                capabilities=caps,
+                context={"goal": desc},
+                timeout=120.0,
+            )
 
         try:
             # Single request mode
@@ -581,7 +267,7 @@ def chat(request: str | None) -> None:
                     break
 
         finally:
-            await cleanup()
+            await pool.shutdown(wait=True)
 
     asyncio.run(run_chat())
 

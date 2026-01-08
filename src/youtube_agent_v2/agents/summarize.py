@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
+from youtube_agent.infra.client import get_chat_client
 from youtube_agent.services.storage import TranscriptStorage
 from youtube_agent.services.summarizer import TranscriptSummarizer
 from youtube_agent.tools.summarize import summarize_stored_transcript, summarize_text
@@ -60,6 +61,29 @@ class SummarizeAgent(BaseAgent):
     def _get_tools(self) -> list[Callable[..., Any]]:
         """Return summarization tools from V1."""
         return [summarize_stored_transcript, summarize_text]
+
+    def _can_handle_intent(self, intent: str) -> bool:
+        """Check if this agent can handle a natural language intent.
+
+        Override to explicitly match summarize/analyze intents.
+
+        :param intent: Natural language intent from handoff
+        :return: True if this agent should handle the intent
+        """
+        intent_lower = intent.lower()
+
+        # Accept summarize/analyze intents
+        summarize_keywords = [
+            "summarize",
+            "summary",
+            "key points",
+            "analyze",
+            "extract",
+            "main ideas",
+            "condense",
+            "highlight",
+        ]
+        return any(kw in intent_lower for kw in summarize_keywords)
 
     async def execute(self, task: Task) -> TaskResult:
         """Execute summarization task and return structured results.
@@ -167,24 +191,54 @@ class SummarizeAgent(BaseAgent):
 
         try:
             summarizer = TranscriptSummarizer()
-            summaries = []
 
+            # Combine all transcripts for cross-video synthesis
+            combined_content = []
             for t in transcripts:
-                # Include goal context for focused summarization via system prompt
-                focus_prompt = (
-                    f"Focus your summary on information relevant to: {goal}\n"
-                    "Extract key details that address the user's specific question."
-                )
-                summary = await summarizer.summarize(
-                    transcript_text=t["text"],
-                    video_title=t.get("title"),
-                    system_prompt=focus_prompt,
-                )
-                summaries.append({
-                    "video_id": t.get("video_id"),
-                    "title": t.get("title"),
-                    "summary": summary,
-                })
+                title = t.get("title", "Unknown")
+                text = t.get("text", "")[:8000]  # Limit per transcript
+                combined_content.append(f"=== VIDEO: {title} ===\n{text}")
+
+            all_transcripts = "\n\n".join(combined_content)
+
+            # Build a synthesis prompt that filters and combines relevant info
+            synthesis_prompt = f"""You are an expert at synthesizing information from multiple video transcripts.
+
+USER'S GOAL: "{goal}"
+
+Your task:
+1. Review ALL transcripts below and identify which videos are RELEVANT to the user's goal
+2. EXCLUDE any videos that don't match (e.g., if user asks for pork loin, exclude pulled pork/pork butt recipes)
+3. SYNTHESIZE the relevant information into ONE coherent answer
+4. If there are multiple approaches/recipes, summarize the COMMON elements and note key differences
+5. Focus on the specific information requested (temps, times, techniques, etc.)
+
+Format your response as:
+## Relevant Videos
+- List which videos were relevant and which were excluded (and why)
+
+## Key Information
+- Synthesized answer addressing the user's goal
+- Use bullet points for specific data (temps, times, etc.)
+- Note if different videos suggest different approaches
+
+## Recommended Approach
+- If multiple methods exist, suggest which might work best (or note that it depends on user preference)
+
+Keep your response focused and under 800 words. Do NOT just list each video separately - SYNTHESIZE the information."""
+
+            synthesized = await summarizer.summarize(
+                transcript_text=all_transcripts,
+                video_title="Multiple Videos",
+                system_prompt=synthesis_prompt,
+            )
+
+            # Return as single synthesized summary
+            summaries = [{
+                "video_id": "synthesized",
+                "title": "Synthesized Research",
+                "summary": synthesized,
+            }]
 
             output = {
                 "summaries": summaries,
@@ -192,24 +246,79 @@ class SummarizeAgent(BaseAgent):
                 "goal": goal,
             }
 
-            # Reason about what's needed next based on the goal
-            goal_lower = goal.lower()
-            needs_write = any(
-                kw in goal_lower
-                for kw in ["write", "save", "export", "file", "markdown", "document"]
-            )
+            # Use LLM to reason about whether the goal is satisfied
+            reasoning = await self._reason_about_goal(goal, output)
 
-            if needs_write:
+            if reasoning["satisfied"]:
+                return HandoffResult.complete(output)
+            else:
                 return HandoffResult.handoff(
-                    intent="Write these summaries to a markdown file",
+                    intent=reasoning["next_step"],
                     state={**state, "summarize": output},
                 )
-
-            # Summarization is usually the final step
-            return HandoffResult.complete(output)
 
         except Exception as e:
             return PartialResult(
                 error=f"Summarization failed: {e}",
                 partial_data=state,
             )
+
+    async def _reason_about_goal(
+        self, goal: str, summary_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Use LLM to reason about whether the goal is satisfied.
+
+        :param goal: Original user request
+        :param summary_data: The summaries we generated
+        :return: Dict with 'satisfied' (bool) and 'next_step' (str if not satisfied)
+        """
+        summary_count = summary_data.get("count", 0)
+        preview = ""
+        if summary_data.get("summaries"):
+            first = summary_data["summaries"][0]
+            text = first.get("summary", "")[:200]
+            preview = f"Preview: {text}..."
+
+        prompt = f"""You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Created {summary_count} synthesized summary from YouTube video transcripts.
+{preview}
+
+QUESTION: Is the user's goal satisfied with this summary, or do they need the content saved to a file?
+
+Consider:
+- If they wanted information, analysis, or answers → goal is SATISFIED (I provided a summary)
+- If they explicitly asked to save, export, write to file, or create a document → need to WRITE TO FILE
+
+IMPORTANT: Summaries are usually the FINAL step. Only say "not satisfied" if the user explicitly asked for file output.
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if no) write to file
+
+Examples:
+Goal: "summarize this video" → SATISFIED: yes
+Goal: "save notes to research.md" → SATISFIED: no, NEXT_STEP: write to file
+Goal: "find videos and summarize" → SATISFIED: yes
+Goal: "get info and export to markdown" → SATISFIED: no, NEXT_STEP: write to file"""
+
+        try:
+            client = get_chat_client()
+            response = await client.get_response(prompt)
+            text = response.text.strip()
+
+            text_lower = text.lower()
+            satisfied = "satisfied: yes" in text_lower or "satisfied:yes" in text_lower
+
+            next_step = ""
+            if not satisfied:
+                # Use explicit handoff intent for writer routing
+                next_step = "write to file"
+
+            return {"satisfied": satisfied, "next_step": next_step}
+
+        except Exception:
+            # On error, default to complete (summarization is usually the final step)
+            return {"satisfied": True, "next_step": ""}

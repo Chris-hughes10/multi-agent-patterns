@@ -6,6 +6,7 @@ Testing Philosophy: Classicist approach (Kent Beck style)
 - Test behavior, not implementation details
 """
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +21,67 @@ from youtube_agent_v2.agents import (
 )
 from youtube_agent_v2.core import AgentRegistry
 from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
+
+
+# ============================================================================
+# Test Helpers for LLM Mocking
+# ============================================================================
+
+
+def create_mock_chat_client(satisfied: bool = True, next_step: str = "") -> MagicMock:
+    """Create a mock chat client that returns appropriate responses based on prompt.
+
+    Handles both query extraction prompts and goal reasoning prompts.
+
+    :param satisfied: Whether to return SATISFIED: yes or no for goal reasoning
+    :param next_step: The next step to return if not satisfied
+    :return: Mock chat client
+    """
+
+    async def smart_get_response(prompt: str) -> MagicMock:
+        """Return different responses based on prompt content."""
+        mock_response = MagicMock()
+
+        # Check if this is a query extraction prompt
+        if "Extract a YouTube search query" in prompt or "Search query:" in prompt:
+            # Return a simple query
+            mock_response.text = "test query"
+        # Check if this is a goal reasoning prompt (look for key phrases from the prompts)
+        elif "goal is satisfied" in prompt.lower() or "SATISFIED:" in prompt:
+            if satisfied:
+                mock_response.text = "SATISFIED: yes\nNEXT_STEP: none"
+            else:
+                mock_response.text = f"SATISFIED: no\nNEXT_STEP: {next_step}"
+        else:
+            # Default response
+            mock_response.text = "default response"
+
+        return mock_response
+
+    mock_client = MagicMock()
+    mock_client.get_response = AsyncMock(side_effect=smart_get_response)
+    return mock_client
+
+
+@contextmanager
+def mock_goal_reasoning(satisfied: bool = True, next_step: str = ""):
+    """Context manager to mock LLM goal reasoning calls.
+
+    :param satisfied: Whether goal should be satisfied
+    :param next_step: Next step if not satisfied
+    """
+    mock_client = create_mock_chat_client(satisfied, next_step)
+    with patch(
+        "youtube_agent_v2.agents.search.get_chat_client",
+        return_value=mock_client,
+    ), patch(
+        "youtube_agent_v2.agents.transcript.get_chat_client",
+        return_value=mock_client,
+    ), patch(
+        "youtube_agent_v2.agents.summarize.get_chat_client",
+        return_value=mock_client,
+    ):
+        yield mock_client
 
 
 # ============================================================================
@@ -125,10 +187,13 @@ class TestSearchAgentAutonomous:
         """SearchAgent should complete when goal is just searching."""
         agent = SearchAgent(registry)
 
-        with patch(
-            "youtube_agent_v2.agents.search.search_youtube",
-            new_callable=AsyncMock,
-            return_value=mock_search_results,
+        with (
+            patch(
+                "youtube_agent_v2.agents.search.search_youtube",
+                new_callable=AsyncMock,
+                return_value=mock_search_results,
+            ),
+            mock_goal_reasoning(satisfied=True),
         ):
             result = await agent.execute_autonomous(
                 goal="Search for Python tutorials",
@@ -141,18 +206,21 @@ class TestSearchAgentAutonomous:
         assert result.result["count"] == 2
 
     @pytest.mark.asyncio
-    async def test_search_hands_off_when_goal_mentions_transcript(
+    async def test_search_hands_off_when_goal_needs_more(
         self,
         registry: AgentRegistry,
         mock_search_results: list[VideoSearchResult],
     ) -> None:
-        """SearchAgent should hand off when goal mentions transcripts."""
+        """SearchAgent should hand off when LLM determines goal needs more work."""
         agent = SearchAgent(registry)
 
-        with patch(
-            "youtube_agent_v2.agents.search.search_youtube",
-            new_callable=AsyncMock,
-            return_value=mock_search_results,
+        with (
+            patch(
+                "youtube_agent_v2.agents.search.search_youtube",
+                new_callable=AsyncMock,
+                return_value=mock_search_results,
+            ),
+            mock_goal_reasoning(satisfied=False, next_step="Get transcripts for these videos"),
         ):
             result = await agent.execute_autonomous(
                 goal="Find videos about cooking and get their transcripts",
@@ -166,18 +234,21 @@ class TestSearchAgentAutonomous:
         assert "search" in result.state
 
     @pytest.mark.asyncio
-    async def test_search_hands_off_when_goal_mentions_summary(
+    async def test_search_hands_off_for_summarization(
         self,
         registry: AgentRegistry,
         mock_search_results: list[VideoSearchResult],
     ) -> None:
-        """SearchAgent should hand off when goal mentions summarization."""
+        """SearchAgent should hand off when LLM determines summarization is needed."""
         agent = SearchAgent(registry)
 
-        with patch(
-            "youtube_agent_v2.agents.search.search_youtube",
-            new_callable=AsyncMock,
-            return_value=mock_search_results,
+        with (
+            patch(
+                "youtube_agent_v2.agents.search.search_youtube",
+                new_callable=AsyncMock,
+                return_value=mock_search_results,
+            ),
+            mock_goal_reasoning(satisfied=False, next_step="Get transcripts and summarize them"),
         ):
             result = await agent.execute_autonomous(
                 goal="Find and summarize videos about machine learning",
@@ -283,6 +354,7 @@ class TestTranscriptAgentAutonomous:
             patch(
                 "youtube_agent_v2.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
+            mock_goal_reasoning(satisfied=True),
         ):
             mock_storage = MagicMock()
             mock_storage.load.return_value = None  # Not cached
@@ -299,12 +371,12 @@ class TestTranscriptAgentAutonomous:
         assert "transcripts" in result.result
 
     @pytest.mark.asyncio
-    async def test_transcript_hands_off_when_goal_mentions_summary(
+    async def test_transcript_hands_off_when_goal_needs_summary(
         self,
         registry: AgentRegistry,
         mock_transcript_result: TranscriptResult,
     ) -> None:
-        """TranscriptAgent should hand off when goal mentions summarization."""
+        """TranscriptAgent should hand off when LLM determines summarization is needed."""
         agent = TranscriptAgent(registry)
 
         with (
@@ -316,6 +388,7 @@ class TestTranscriptAgentAutonomous:
             patch(
                 "youtube_agent_v2.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
+            mock_goal_reasoning(satisfied=False, next_step="Summarize these transcripts"),
         ):
             mock_storage = MagicMock()
             mock_storage.load.return_value = None
@@ -350,6 +423,7 @@ class TestTranscriptAgentAutonomous:
             patch(
                 "youtube_agent_v2.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
+            mock_goal_reasoning(satisfied=True),
         ):
             mock_storage = MagicMock()
             mock_storage.load.return_value = None
@@ -404,9 +478,12 @@ class TestSummarizeAgentAutonomous:
         """SummarizeAgent should typically complete (final step)."""
         agent = SummarizeAgent(registry)
 
-        with patch(
-            "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
-        ) as mock_summarizer_class:
+        with (
+            patch(
+                "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
+            ) as mock_summarizer_class,
+            mock_goal_reasoning(satisfied=True),
+        ):
             mock_summarizer = MagicMock()
             mock_summarizer.summarize = AsyncMock(return_value="This is a summary.")
             mock_summarizer_class.return_value = mock_summarizer
@@ -427,16 +504,19 @@ class TestSummarizeAgentAutonomous:
         assert "summaries" in result.result
 
     @pytest.mark.asyncio
-    async def test_summarize_hands_off_when_goal_mentions_write(
+    async def test_summarize_hands_off_when_goal_needs_file(
         self,
         registry: AgentRegistry,
     ) -> None:
-        """SummarizeAgent should hand off when goal mentions writing."""
+        """SummarizeAgent should hand off when LLM determines file writing is needed."""
         agent = SummarizeAgent(registry)
 
-        with patch(
-            "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
-        ) as mock_summarizer_class:
+        with (
+            patch(
+                "youtube_agent_v2.agents.summarize.TranscriptSummarizer"
+            ) as mock_summarizer_class,
+            mock_goal_reasoning(satisfied=False, next_step="Write these summaries to a markdown file"),
+        ):
             mock_summarizer = MagicMock()
             mock_summarizer.summarize = AsyncMock(return_value="This is a summary.")
             mock_summarizer_class.return_value = mock_summarizer
@@ -454,7 +534,7 @@ class TestSummarizeAgentAutonomous:
 
         assert isinstance(result, HandoffResult)
         assert result.is_handoff
-        assert "write" in result.intent.lower()
+        assert "write" in result.intent.lower() or "file" in result.intent.lower()
         assert "summarize" in result.state
 
     @pytest.mark.asyncio
@@ -525,10 +605,22 @@ class TestWriterAgentAutonomous:
             written_content = content
             return f"/output/{prefix}_file.md"
 
-        with patch(
-            "youtube_agent_v2.agents.writer.write_timestamped_markdown",
-            new_callable=AsyncMock,
-            side_effect=capture_write,
+        # Mock the LLM call for synthesizing markdown
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "# Cooking Research\n\n## Summary\n\nCook at 350F for best results."
+        mock_client.get_response = AsyncMock(return_value=mock_response)
+
+        with (
+            patch(
+                "youtube_agent_v2.agents.writer.write_timestamped_markdown",
+                new_callable=AsyncMock,
+                side_effect=capture_write,
+            ),
+            patch(
+                "youtube_agent_v2.agents.writer.get_chat_client",
+                return_value=mock_client,
+            ),
         ):
             await agent.execute_autonomous(
                 goal="Save cooking research",
@@ -547,8 +639,9 @@ class TestWriterAgentAutonomous:
             )
 
         assert written_content is not None
-        assert "Save cooking research" in written_content or "Research" in written_content
-        assert "350F" in written_content or "Summary" in written_content.lower()
+        # Check content includes either synthesized or original data
+        assert "350" in written_content  # Temperature value preserved
+        assert "Source Videos" in written_content  # Video links appended
 
 
 # ============================================================================
@@ -577,10 +670,13 @@ class TestAutonomousChain:
         """Test chain that completes at search."""
         search_agent = full_registry.get_agent("search")
 
-        with patch(
-            "youtube_agent_v2.agents.search.search_youtube",
-            new_callable=AsyncMock,
-            return_value=mock_search_results,
+        with (
+            patch(
+                "youtube_agent_v2.agents.search.search_youtube",
+                new_callable=AsyncMock,
+                return_value=mock_search_results,
+            ),
+            mock_goal_reasoning(satisfied=True),
         ):
             result = await search_agent.execute_autonomous(
                 goal="Find videos about Python",
@@ -602,11 +698,14 @@ class TestAutonomousChain:
         search_agent = full_registry.get_agent("search")
         transcript_agent = full_registry.get_agent("transcript")
 
-        # Step 1: Search (goal mentions transcripts so it hands off)
-        with patch(
-            "youtube_agent_v2.agents.search.search_youtube",
-            new_callable=AsyncMock,
-            return_value=mock_search_results,
+        # Step 1: Search hands off to transcript
+        with (
+            patch(
+                "youtube_agent_v2.agents.search.search_youtube",
+                new_callable=AsyncMock,
+                return_value=mock_search_results,
+            ),
+            mock_goal_reasoning(satisfied=False, next_step="Get transcripts for these videos"),
         ):
             search_result = await search_agent.execute_autonomous(
                 goal="Find videos about cooking and get transcripts",
@@ -616,8 +715,7 @@ class TestAutonomousChain:
         assert search_result.is_handoff
         assert "videos" in search_result.state
 
-        # Step 2: Transcript with a goal that doesn't mention summarization
-        # This tests that transcript completes when goal is just transcripts
+        # Step 2: Transcript completes
         with (
             patch(
                 "youtube_agent_v2.agents.transcript.fetch_transcript",
@@ -627,19 +725,18 @@ class TestAutonomousChain:
             patch(
                 "youtube_agent_v2.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
+            mock_goal_reasoning(satisfied=True),
         ):
             mock_storage = MagicMock()
             mock_storage.load.return_value = None
             mock_storage.save.return_value = None
             mock_storage_class.return_value = mock_storage
 
-            # Use a goal that only asks for transcripts
             transcript_result = await transcript_agent.execute_autonomous(
                 goal="Get the transcripts from these videos",
                 state=search_result.state,
             )
 
-        # Should complete since goal doesn't mention summarization
         assert isinstance(transcript_result, HandoffResult)
         assert transcript_result.is_complete
         assert "transcripts" in transcript_result.result

@@ -181,6 +181,27 @@ class AgentRegistry:
         """
         return await self._task_queue.wait_for_task(task_id, timeout)
 
+    async def wait_for_task_available(self, timeout: float | None = None) -> bool:
+        """Wait until an unclaimed task is available (event-driven).
+
+        This method blocks until a task is available, avoiding polling.
+
+        :param timeout: Optional timeout in seconds
+        :return: True if a task is available, False if timeout
+        """
+        return await self._task_queue.wait_for_task_available(timeout)
+
+    async def wait_for_queue_change(self, timeout: float | None = None) -> bool:
+        """Wait for any queue state change (new task, claim, or completion).
+
+        Used by agents to wait when they've declined a task, to avoid
+        busy looping while waiting for someone else to claim it.
+
+        :param timeout: Optional timeout in seconds
+        :return: True if a change occurred, False if timeout
+        """
+        return await self._task_queue.wait_for_queue_change(timeout)
+
     @property
     def task_queue(self) -> AsyncTaskQueue:
         """Access the underlying task queue.

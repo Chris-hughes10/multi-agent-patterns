@@ -1,10 +1,12 @@
 """TranscriptAgent - YouTube transcript fetching and storage specialist."""
 
 import asyncio
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
 
+from youtube_agent.infra.client import get_chat_client
 from youtube_agent.services.storage import TranscriptStorage
 from youtube_agent.services.youtube import extract_video_id, fetch_transcript
 from youtube_agent.tools.transcript import (
@@ -15,6 +17,8 @@ from youtube_agent.tools.transcript import (
 )
 from youtube_agent_v2.core import BaseAgent, Task, TaskResult, TaskStatus
 from youtube_agent_v2.core.models.handoff import HandoffResult, PartialResult
+
+logger = logging.getLogger(__name__)
 
 TRANSCRIPT_INSTRUCTIONS = """You are a Transcript Agent. Your job is to fetch and manage YouTube video transcripts.
 
@@ -71,6 +75,26 @@ class TranscriptAgent(BaseAgent):
             lookup_stored_transcript,
             list_stored_transcripts,
         ]
+
+    def _can_handle_intent(self, intent: str) -> bool:
+        """Check if this agent can handle a natural language intent.
+
+        Override to reject summarize/analyze intents - those should go to SummarizeAgent
+        even if "transcript" appears in the text.
+
+        :param intent: Natural language intent from handoff
+        :return: True if this agent should handle the intent
+        """
+        intent_lower = intent.lower()
+
+        # Reject summarize/analyze intents - those are for SummarizeAgent
+        summarize_keywords = ["summarize", "summary", "key points", "analyze", "extract info"]
+        if any(kw in intent_lower for kw in summarize_keywords):
+            return False
+
+        # Accept transcript-related intents
+        transcript_keywords = ["transcript", "captions", "fetch", "get text", "spoken words"]
+        return any(kw in intent_lower for kw in transcript_keywords)
 
     async def execute(self, task: Task) -> TaskResult:
         """Execute transcript task and return structured results.
@@ -138,6 +162,16 @@ class TranscriptAgent(BaseAgent):
         videos = state.get("videos", [])
         video_id = state.get("video_id")
 
+        # Check for parallel_results from fan-out (recovers videos if join was misrouted)
+        if not videos and "parallel_results" in state:
+            parallel_results = state["parallel_results"]
+            logger.info("Extracting videos from parallel_results (%d results)", len(parallel_results))
+            for result in parallel_results:
+                if isinstance(result, dict) and "results" in result:
+                    videos.extend(result["results"])
+            if videos:
+                logger.info("Recovered %d videos from parallel search results", len(videos))
+
         if not videos and not video_id:
             # Try to extract video_id from goal
             try:
@@ -151,56 +185,206 @@ class TranscriptAgent(BaseAgent):
         try:
             storage = TranscriptStorage()
             transcripts = []
+            errors = []  # Track per-video errors for graceful degradation
 
             if video_id:
                 # Single video
-                output = await self._fetch_single_transcript(storage, video_id)
-                transcripts.append(output)
+                logger.info("Fetching transcript for single video: %s", video_id)
+                try:
+                    output = await self._fetch_single_transcript(storage, video_id)
+                    logger.info("  Got transcript: %s (%d chars)", output.get("title", "Unknown"), len(output.get("text", "")))
+                    transcripts.append(output)
+                except Exception as e:
+                    logger.warning("  Failed to fetch transcript: %s", e)
+                    errors.append({"video_id": video_id, "error": str(e)})
             else:
-                # Multiple videos from search - fetch first few
-                for video in videos[:3]:  # Limit to 3 for efficiency
+                # Multiple videos from search - use LLM to select most relevant
+                # Use original_request if available (contains user's channel preferences)
+                selection_goal = state.get("original_request", goal)
+                max_transcripts = state.get("max_transcripts", 5)
+                selected_videos = await self._select_relevant_videos(videos, selection_goal, max_count=max_transcripts)
+                logger.info("Selected %d most relevant videos from %d available", len(selected_videos), len(videos))
+                for video in selected_videos:
                     vid = video.get("video_id") or video
+                    # Preserve title from search results if available
+                    search_title = video.get("title") if isinstance(video, dict) else None
                     if isinstance(vid, str):
-                        output = await self._fetch_single_transcript(storage, vid)
-                        transcripts.append(output)
+                        logger.info("  Fetching: %s - %s", vid, search_title or "Unknown")
+                        try:
+                            output = await self._fetch_single_transcript(storage, vid)
+                            # Use search title if transcript title is missing
+                            if search_title and (not output.get("title") or output.get("title") == "Unknown"):
+                                output["title"] = search_title
+                            logger.info("    Got %d chars", len(output.get("text", "")))
+                            transcripts.append(output)
+                        except Exception as e:
+                            # Log error but continue with other videos (graceful degradation)
+                            logger.warning("    Failed: %s", e)
+                            errors.append({"video_id": vid, "error": str(e)})
+                            continue
+
+            # If no transcripts fetched at all, return partial result with errors
+            if not transcripts and errors:
+                return PartialResult(
+                    error=f"Failed to fetch any transcripts: {errors}",
+                    partial_data=state,
+                )
 
             transcript_data = {
                 "transcripts": transcripts,
+                "errors": errors,  # Include errors so downstream agents are aware
                 "count": len(transcripts),
             }
 
-            # Reason about what's needed next based on the goal
-            goal_lower = goal.lower()
-            needs_summary = any(
-                kw in goal_lower
-                for kw in [
-                    "summarize",
-                    "summary",
-                    "key points",
-                    "main ideas",
-                    "analyze",
-                    "extract",
-                    "temperature",
-                    "cooking",
-                    "how to",
-                    "instructions",
-                ]
-            )
+            # Use LLM to reason about whether the goal is satisfied
+            reasoning = await self._reason_about_goal(goal, transcript_data)
 
-            if needs_summary:
+            if reasoning["satisfied"]:
+                return HandoffResult.complete(transcript_data)
+            else:
                 return HandoffResult.handoff(
-                    intent="Summarize these transcripts focusing on the user's query",
+                    intent=reasoning["next_step"],
                     state={**state, "transcript": transcript_data},
                 )
-
-            # Goal is satisfied with just transcripts
-            return HandoffResult.complete(transcript_data)
 
         except Exception as e:
             return PartialResult(
                 error=f"Transcript fetch failed: {e}",
                 partial_data=state,
             )
+
+    async def _reason_about_goal(
+        self, goal: str, transcript_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Use LLM to reason about whether the goal is satisfied.
+
+        :param goal: Original user request
+        :param transcript_data: The transcripts we fetched
+        :return: Dict with 'satisfied' (bool) and 'next_step' (str if not satisfied)
+        """
+        transcript_count = transcript_data.get("count", 0)
+        # Get a preview of transcript content
+        preview = ""
+        if transcript_data.get("transcripts"):
+            first = transcript_data["transcripts"][0]
+            text = first.get("text", "")[:200]
+            preview = f"Preview: {text}..."
+
+        prompt = f"""You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Fetched {transcript_count} transcript(s) from YouTube videos.
+{preview}
+
+QUESTION: Is the user's goal satisfied by just having these raw transcripts, or do they need more?
+
+Consider:
+- If they ONLY want the transcript text itself → goal is SATISFIED
+- If they want specific information extracted (temperatures, steps, times, etc.) → need SUMMARIZATION first
+- If they want key points, summaries, or answers to questions → need SUMMARIZATION first
+- If they want to save/export AND need analysis → SUMMARIZE FIRST, then save (summarization must come before saving!)
+
+IMPORTANT: If the goal mentions both "summarize" AND "save to file", the next step is SUMMARIZATION (the save comes after).
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if not satisfied) describe what needs to happen next - focus on ANALYSIS/SUMMARIZATION, not file saving
+
+Example responses:
+SATISFIED: yes
+NEXT_STEP: none
+
+SATISFIED: no
+NEXT_STEP: Analyze these transcripts to extract the cooking temperatures, grill setup, and timing information the user asked for"""
+
+        try:
+            client = get_chat_client()
+            response = await client.get_response(prompt)
+            text = response.text.strip()
+
+            # Parse the response
+            text_lower = text.lower()
+            satisfied = "satisfied: yes" in text_lower or "satisfied:yes" in text_lower
+
+            next_step = "Summarize these transcripts focusing on the user's query"
+            if "NEXT_STEP:" in text:
+                next_step = text.split("NEXT_STEP:")[-1].strip()
+                if next_step.lower() == "none":
+                    next_step = ""
+
+            return {"satisfied": satisfied, "next_step": next_step}
+
+        except Exception:
+            # On error, default to handing off (safer to do more work than less)
+            return {
+                "satisfied": False,
+                "next_step": "Summarize these transcripts to extract the information the user needs",
+            }
+
+    async def _select_relevant_videos(
+        self,
+        videos: list[dict[str, Any]],
+        goal: str,
+        max_count: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Use LLM to select the most relevant videos for the user's goal.
+
+        :param videos: List of video dicts with title, channel, video_id
+        :param goal: The user's goal/request
+        :param max_count: Maximum number of videos to select
+        :return: List of selected video dicts
+        """
+        if len(videos) <= max_count:
+            return videos
+
+        # Build video list for the prompt
+        video_descriptions = []
+        for i, video in enumerate(videos):
+            title = video.get("title", "Unknown")
+            channel = video.get("channel", "Unknown")
+            video_descriptions.append(f"{i + 1}. \"{title}\" by {channel}")
+
+        prompt = f"""Select the {max_count} most relevant videos for this user's request.
+
+USER'S REQUEST: "{goal}"
+
+AVAILABLE VIDEOS:
+{chr(10).join(video_descriptions)}
+
+Select videos that best match what the user asked for. Prioritize videos from any channels the user mentioned by name.
+
+Respond with ONLY the numbers of your choices, separated by commas (e.g., 1, 4, 7)"""
+
+        try:
+            client = get_chat_client()
+            response = await client.get_response(prompt)
+            text = response.text.strip()
+
+            # Parse the numbers from the response
+            import re
+            numbers = re.findall(r"\d+", text)
+            selected_indices = []
+            for num in numbers:
+                idx = int(num) - 1  # Convert to 0-indexed
+                if 0 <= idx < len(videos) and idx not in selected_indices:
+                    selected_indices.append(idx)
+                if len(selected_indices) >= max_count:
+                    break
+
+            if selected_indices:
+                selected = [videos[i] for i in selected_indices]
+                logger.info(
+                    "LLM selected videos: %s",
+                    ", ".join(v.get("title", "?")[:40] for v in selected),
+                )
+                return selected
+
+        except Exception as e:
+            logger.warning("Video selection failed: %s, using first %d", e, max_count)
+
+        # Fallback to first N videos
+        return videos[:max_count]
 
     async def _fetch_single_transcript(
         self,

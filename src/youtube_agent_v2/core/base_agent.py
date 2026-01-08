@@ -98,13 +98,64 @@ class BaseAgent(ABC):
     def can_handle(self, task: Task) -> bool:
         """Check if this agent can handle the given task.
 
-        Returns True if any of the agent's capabilities match
-        any of the task's required capabilities.
+        Routing priority:
+        1. LLM-routed tasks: Check if we're the target agent (routed_to field)
+        2. Capability-based: Check if our capabilities match required_capabilities
+        3. Intent-based fallback: Use keyword matching (legacy)
 
         :param task: Task to check
         :return: True if agent can handle the task
         """
-        return any(cap in self.capabilities for cap in task.required_capabilities)
+        # Priority 1: LLM-routed handoff tasks
+        # If the task was routed by LLM, only the target agent can handle it
+        routed_to = task.context.get("routed_to")
+        if routed_to is not None:
+            return routed_to == self.name
+
+        # Priority 2: Capability-based routing
+        if task.required_capabilities:
+            return any(cap in self.capabilities for cap in task.required_capabilities)
+
+        # Priority 3: Intent-based fallback (for unrouted handoffs)
+        intent = task.context.get("intent", "")
+        if intent:
+            return self._can_handle_intent(intent)
+
+        return False
+
+    def _can_handle_intent(self, intent: str) -> bool:
+        """Check if this agent can handle a natural language intent.
+
+        Uses keyword matching against capabilities and description.
+        Override for more sophisticated intent matching.
+
+        :param intent: Natural language intent from handoff
+        :return: True if this agent should handle the intent
+        """
+        intent_lower = intent.lower()
+
+        # Map common intent keywords to capabilities
+        intent_keywords = {
+            "transcript": ["transcript", "captions", "spoken words", "text from video"],
+            "summarize": ["summarize", "summary", "key points", "extract", "analyze"],
+            "search": ["search", "find videos", "look for"],
+            "write": ["write", "save", "export", "file"],
+        }
+
+        for capability in self.capabilities:
+            # Direct capability match
+            if capability.replace("_", " ") in intent_lower:
+                return True
+
+            # Check capability-specific keywords
+            cap_base = capability.split("_")[0]  # e.g., "youtube_search" -> "youtube"
+            if cap_base in intent_keywords and any(
+                kw in intent_lower for kw in intent_keywords[cap_base]
+            ):
+                return True
+
+        # Also check against agent name
+        return self.name in intent_lower
 
     def _get_chat_agent(self) -> ChatAgent:
         """Get or create the underlying ChatAgent.

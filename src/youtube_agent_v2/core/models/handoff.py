@@ -10,37 +10,48 @@ from typing import Any, Literal
 
 @dataclass
 class HandoffResult:
-    """Result from an agent's execution - either complete or handoff.
+    """Result from an agent's execution - complete, handoff, or fan_out.
 
     Forces explicit signaling: an agent must either complete with a result,
-    or hand off with an intent describing what needs to happen next.
+    hand off to a single next agent, or fan out to multiple parallel agents.
 
     Example - completing:
-        return HandoffResult(
-            action="complete",
-            result={"videos": [...], "summary": "Found 3 relevant videos"}
+        return HandoffResult.complete({"videos": [...], "summary": "Found 3 videos"})
+
+    Example - handing off (sequential):
+        return HandoffResult.handoff(
+            intent="Get transcripts for these videos",
+            state={"videos": search_results}
         )
 
-    Example - handing off:
-        return HandoffResult(
-            action="handoff",
-            intent="Get transcripts for these videos to find cooking details",
-            state={"videos": search_results, "query": original_query}
+    Example - fan out (parallel):
+        return HandoffResult.fan_out(
+            intents=["Search chuds bbq for pork loin", "Search fork and embers for pork loin"],
+            join_intent="Combine search results and get transcripts",
+            state={"query": "pork loin kamado"}
         )
 
-    :param action: Either "complete" (done) or "handoff" (pass to next agent)
+    :param action: "complete" (done), "handoff" (sequential), or "fan_out" (parallel)
     :param result: The final result (required if action="complete")
-    :param intent: Natural language description of what's needed next (required if action="handoff")
-    :param state: Accumulated state to pass to the next agent (optional, used with handoff)
+    :param intent: What's needed next (required if action="handoff")
+    :param intents: Multiple parallel tasks (required if action="fan_out")
+    :param join_intent: What to do after parallel tasks complete (required if action="fan_out")
+    :param state: Accumulated state to pass forward
     """
 
-    action: Literal["complete", "handoff"]
+    action: Literal["complete", "handoff", "fan_out"]
 
     # If action == "complete"
     result: Any | None = None
 
     # If action == "handoff"
     intent: str | None = None
+
+    # If action == "fan_out"
+    intents: list[str] | None = None
+    join_intent: str | None = None
+
+    # Shared state for handoff and fan_out
     state: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -49,6 +60,11 @@ class HandoffResult:
             raise ValueError("Complete action requires a result")
         if self.action == "handoff" and self.intent is None:
             raise ValueError("Handoff action requires an intent")
+        if self.action == "fan_out":
+            if not self.intents or len(self.intents) < 2:
+                raise ValueError("Fan out action requires at least 2 intents")
+            if self.join_intent is None:
+                raise ValueError("Fan out action requires a join_intent")
 
     @property
     def is_complete(self) -> bool:
@@ -57,8 +73,13 @@ class HandoffResult:
 
     @property
     def is_handoff(self) -> bool:
-        """Check if this result represents a handoff."""
+        """Check if this result represents a sequential handoff."""
         return self.action == "handoff"
+
+    @property
+    def is_fan_out(self) -> bool:
+        """Check if this result represents parallel fan-out."""
+        return self.action == "fan_out"
 
     @classmethod
     def complete(cls, result: Any) -> "HandoffResult":
@@ -75,13 +96,37 @@ class HandoffResult:
         intent: str,
         state: dict[str, Any] | None = None,
     ) -> "HandoffResult":
-        """Factory method for creating a handoff result.
+        """Factory method for creating a sequential handoff result.
 
         :param intent: Description of what needs to happen next
         :param state: Accumulated state to pass forward
         :return: HandoffResult with action="handoff"
         """
         return cls(action="handoff", intent=intent, state=state or {})
+
+    @classmethod
+    def fan_out(
+        cls,
+        intents: list[str],
+        join_intent: str,
+        state: dict[str, Any] | None = None,
+    ) -> "HandoffResult":
+        """Factory method for creating a parallel fan-out result.
+
+        Use this when multiple independent tasks can run in parallel,
+        then need to be joined before continuing.
+
+        :param intents: List of parallel task descriptions (min 2)
+        :param join_intent: What to do after all parallel tasks complete
+        :param state: Accumulated state to pass to each parallel task
+        :return: HandoffResult with action="fan_out"
+        """
+        return cls(
+            action="fan_out",
+            intents=intents,
+            join_intent=join_intent,
+            state=state or {},
+        )
 
 
 @dataclass

@@ -50,83 +50,93 @@ class IntentRouter(ABC):
 class LLMIntentRouter(IntentRouter):
     """Routes intents using LLM evaluation.
 
-    For each agent, asks the LLM whether the agent can handle the intent.
-    Simple but potentially expensive for many agents.
+    For multi-step intents, asks the LLM to identify the FIRST step
+    and which agent should handle it. This enables the autonomous
+    chain to start at the right place.
 
     :param client: Optional chat client (uses default if not provided)
-    :param confidence_threshold: Minimum confidence (0-1) to accept a match
     """
 
     def __init__(
         self,
         client: AzureOpenAIChatClient | None = None,
-        confidence_threshold: float = 0.7,
     ) -> None:
         """Initialize the router.
 
         :param client: Optional chat client for LLM calls
-        :param confidence_threshold: Minimum confidence to accept a match
         """
         self._client = client or get_chat_client()
-        self._confidence_threshold = confidence_threshold
 
     async def find_agent_for_intent(
         self,
         intent: str,
         registry: "AgentRegistry",
     ) -> "BaseAgent | None":
-        """Find agent by asking LLM to evaluate each candidate.
+        """Find agent by asking LLM which agent should handle FIRST.
+
+        For multi-step intents, identifies the first step in the workflow
+        and returns the agent best suited to handle it.
 
         :param intent: Natural language intent
         :param registry: Agent registry to search
-        :return: Best matching agent or None
+        :return: Best matching agent for the first step, or None
         """
-        best_agent: BaseAgent | None = None
-        best_score = 0.0
+        # Build agent catalog for the prompt
+        agents = registry.all_agents()
+        if not agents:
+            return None
 
-        for agent in registry.all_agents():
-            score = await self._evaluate_agent(agent, intent)
-            if score > best_score and score >= self._confidence_threshold:
-                best_score = score
-                best_agent = agent
+        agent_descriptions = []
+        for agent in agents:
+            desc = getattr(agent, "description", f"Agent with capabilities: {', '.join(agent.capabilities)}")
+            agent_descriptions.append(f"- {agent.name}: {desc}")
 
-        return best_agent
+        agents_text = "\n".join(agent_descriptions)
 
-    async def _evaluate_agent(self, agent: "BaseAgent", intent: str) -> float:
-        """Evaluate how well an agent matches an intent.
+        prompt = f"""You are a task router for a multi-agent workflow. Route the intent to the FIRST agent needed.
 
-        :param agent: Agent to evaluate
-        :param intent: Intent to match against
-        :return: Confidence score 0-1
-        """
-        # Get agent description (use capabilities as fallback)
-        description = getattr(agent, "description", None)
-        if description is None:
-            description = f"Agent with capabilities: {', '.join(agent.capabilities)}"
+AVAILABLE AGENTS:
+{agents_text}
 
-        prompt = f"""You are evaluating whether an agent can handle a task.
+INTENT TO ROUTE: "{intent}"
 
-AGENT: {agent.name}
-DESCRIPTION: {description}
-CAPABILITIES: {', '.join(agent.capabilities)}
+Instructions:
+1. If the intent has MULTIPLE steps (e.g., "get transcripts AND summarize"), choose the FIRST step
+2. The workflow order is typically: search → transcript → summarize → writer
+3. Agent selection rules:
+   - If we need to FIND/SEARCH for videos → "search"
+   - If we need to GET/FETCH transcripts or captions → "transcript"
+   - If we already HAVE transcripts/text and need to analyze/summarize/extract → "summarize"
+   - If we need to SAVE/WRITE/EXPORT to a file → "writer"
+4. Key: "Get transcripts and then summarize" → choose "transcript" (first step)
+5. Key: "Summarize these transcripts" (transcripts already provided) → choose "summarize"
+6. Respond with ONLY the agent name (e.g., "search", "transcript", "summarize", "writer")
+7. If no agent can help, respond with "none"
 
-TASK INTENT: "{intent}"
-
-On a scale of 0.0 to 1.0, how well can this agent handle this task?
-- 1.0 = Perfect match, this is exactly what the agent does
-- 0.7+ = Good match, agent can definitely help
-- 0.5 = Partial match, agent might be able to help
-- Below 0.5 = Poor match, agent is not suitable
-
-Respond with ONLY a number between 0.0 and 1.0, nothing else."""
+Agent name:"""
 
         try:
             response = await self._client.get_response(prompt)
-            score_text = response.text.strip()
-            return float(score_text)
+            agent_name = response.text.strip().lower()
+
+            # Handle "none" response
+            if agent_name == "none":
+                return None
+
+            # Find the agent by name
+            for agent in agents:
+                if agent.name.lower() == agent_name:
+                    return agent
+
+            # If exact match failed, try partial match
+            for agent in agents:
+                if agent_name in agent.name.lower() or agent.name.lower() in agent_name:
+                    return agent
+
+            return None
+
         except (ValueError, AttributeError):
-            # If we can't parse the response, return 0
-            return 0.0
+            return None
 
 
 class CapabilityIntentRouter(IntentRouter):
@@ -277,11 +287,10 @@ class CompositeIntentRouter(IntentRouter):
 def get_default_router() -> IntentRouter:
     """Get the default intent router configuration.
 
-    Returns a CapabilityIntentRouter with LLMIntentRouter as fallback.
-    This provides fast keyword-based routing with LLM disambiguation
-    for ambiguous cases.
+    Returns an LLMIntentRouter for semantic intent understanding.
+    We use LLM-only routing to enable agents to reason about
+    the appropriate next step rather than relying on keyword matching.
 
     :return: Configured IntentRouter
     """
-    llm_router = LLMIntentRouter()
-    return CapabilityIntentRouter(fallback=llm_router)
+    return LLMIntentRouter()

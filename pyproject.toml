@@ -39,6 +39,7 @@ dev = [
 [project.scripts]
 youtube-agent = "youtube_agent.cli.main:main"
 youtube-agent-v2 = "youtube_agent_v2.cli.main:main"
+youtube-agent-planner = "youtube_agent_planner.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -76,7 +77,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["youtube_agent"]
+known-first-party = ["youtube_agent", "youtube_agent_v2", "youtube_agent_planner"]
 
 [tool.ruff.format]
 quote-style = "double"

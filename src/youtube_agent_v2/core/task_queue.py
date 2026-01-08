@@ -29,6 +29,7 @@ class AsyncTaskQueue:
         self._completed: dict[str, Task] = {}
         self._lock = asyncio.Lock()
         self._task_events: dict[str, asyncio.Event] = {}  # For waiting on specific tasks
+        self._new_task_event = asyncio.Event()  # For event-driven notifications
 
     async def put(self, task: "Task") -> None:
         """Add a task to the queue.
@@ -39,6 +40,8 @@ class AsyncTaskQueue:
             self._pending[task.id] = task
             self._task_events[task.id] = asyncio.Event()
         await self._queue.put(task)
+        # Wake up any agents waiting for tasks
+        self._new_task_event.set()
 
     async def get(self) -> "Task":
         """Get the next task from the queue (blocking).
@@ -88,7 +91,9 @@ class AsyncTaskQueue:
             if task_id not in self._pending:
                 return False  # Task doesn't exist or already completed
             self._claimed[task_id] = agent_name
-            return True
+        # Notify agents waiting for queue changes
+        self._new_task_event.set()
+        return True
 
     async def mark_completed(self, task: "Task") -> None:
         """Mark a task as completed and notify waiters.
@@ -103,6 +108,8 @@ class AsyncTaskQueue:
                 del self._claimed[task.id]
             if task.id in self._task_events:
                 self._task_events[task.id].set()
+        # Notify agents waiting for queue changes
+        self._new_task_event.set()
 
     async def wait_for_task(self, task_id: str, timeout: float | None = None) -> "Task | None":
         """Wait for a specific task to complete.
@@ -142,3 +149,42 @@ class AsyncTaskQueue:
         :return: True if no pending tasks
         """
         return self._queue.empty() and len(self._pending) == 0
+
+    async def wait_for_task_available(self, timeout: float | None = None) -> bool:
+        """Wait until an unclaimed task is available (event-driven).
+
+        This method blocks until a task is available, avoiding polling.
+        Returns immediately if an unclaimed task already exists.
+
+        :param timeout: Optional timeout in seconds
+        :return: True if a task is available, False if timeout
+        """
+        while True:
+            # Check if any unclaimed task exists
+            async with self._lock:
+                for task_id in self._pending:
+                    if task_id not in self._claimed:
+                        return True
+
+            # No task available, wait for notification
+            self._new_task_event.clear()
+            try:
+                await asyncio.wait_for(self._new_task_event.wait(), timeout=timeout)
+            except TimeoutError:
+                return False
+
+    async def wait_for_queue_change(self, timeout: float | None = None) -> bool:
+        """Wait for any queue state change (new task, claim, or completion).
+
+        Used by agents to wait when they've declined a task, to avoid
+        busy looping while waiting for someone else to claim it.
+
+        :param timeout: Optional timeout in seconds
+        :return: True if a change occurred, False if timeout
+        """
+        self._new_task_event.clear()
+        try:
+            await asyncio.wait_for(self._new_task_event.wait(), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
