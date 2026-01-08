@@ -6,7 +6,7 @@
 
 The **planner pattern** uses an LLM to analyze the user's request upfront and create a structured execution plan (DAG - Directed Acyclic Graph). The DAGExecutor then runs the plan with dependency tracking and parallel execution of independent steps.
 
-This pattern is **decoupled from youtube_agent_v2** to keep each approach focused:
+This pattern is **decoupled from youtube_autonomous_agents** to keep each approach focused:
 - `youtube-agent-v2` - Autonomous agents with event-driven self-selection
 - `youtube-agent-planner` - Explicit planning with DAG execution
 

@@ -11,13 +11,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-# Import shared components from youtube_agent_v2
-from youtube_agent_v2.core.models.handoff import PartialResult
-from youtube_agent_v2.core.session import ExecutionStep, Session
+from youtube_autonomous_agents.infra.session import ExecutionStep, Session
+
+# Import shared components from youtube_autonomous_agents
+from youtube_autonomous_agents.models.handoff import PartialResult
 
 if TYPE_CHECKING:
-    from youtube_agent_v2.core.base_agent import BaseAgent
-    from youtube_agent_v2.core.registry import AgentRegistry
+    from youtube_autonomous_agents.infra.base_agent import BaseAgent
+    from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 logger = logging.getLogger("youtube_agent_planner.dag_executor")
 
@@ -354,7 +355,7 @@ class DAGExecutor:
 
         # Execute
         try:
-            from youtube_agent_v2.core import Task
+            from youtube_autonomous_agents.models import Task
 
             # Build description from step description and resolved input
             if isinstance(resolved_input, dict):

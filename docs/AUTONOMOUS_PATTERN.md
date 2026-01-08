@@ -257,7 +257,7 @@ See [V2_IMPLEMENTATION_PLAN.md](./V2_IMPLEMENTATION_PLAN.md) for full details.
 - **Parallel searches across multiple sources**
 - Building toward truly autonomous systems
 - Natural language task descriptions
-- Any youtube_agent_v2 use case (this is the unified pattern)
+- Any youtube_autonomous_agents use case (this is the unified pattern)
 
 **Consider alternatives when:**
 - Workflow is fixed and predictable → use `youtube-agent-planner` (separate package)
@@ -280,10 +280,10 @@ See [V2_IMPLEMENTATION_PLAN.md](./V2_IMPLEMENTATION_PLAN.md) for full details.
 
 | Component | Path |
 |-----------|------|
-| Self-Selection Pool | `src/youtube_agent_v2/patterns/self_selection.py` |
-| Task Queue | `src/youtube_agent_v2/core/task_queue.py` |
-| Intent Router | `src/youtube_agent_v2/core/intent_router.py` |
-| Base Agent | `src/youtube_agent_v2/core/base_agent.py` |
-| Handoff Models | `src/youtube_agent_v2/core/models/handoff.py` |
-| Agents | `src/youtube_agent_v2/agents/` |
-| CLI Entry | `src/youtube_agent_v2/cli/main.py` |
+| Self-Selection Pool | `src/youtube_autonomous_agents/patterns/self_selection.py` |
+| Task Queue | `src/youtube_autonomous_agents/core/task_queue.py` |
+| Intent Router | `src/youtube_autonomous_agents/core/intent_router.py` |
+| Base Agent | `src/youtube_autonomous_agents/core/base_agent.py` |
+| Handoff Models | `src/youtube_autonomous_agents/core/models/handoff.py` |
+| Agents | `src/youtube_autonomous_agents/agents/` |
+| CLI Entry | `src/youtube_autonomous_agents/cli/main.py` |

@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -22,7 +22,7 @@ class TestAsyncParallelExecution:
             return f"Response from {agent_name}"
 
         # Import here to avoid circular imports
-        from youtube_agent.agents.orchestrator import OrchestratorAgent
+        from youtube_agent_orchestrator.agents.orchestrator import OrchestratorAgent
 
         orchestrator = OrchestratorAgent()
 
@@ -67,21 +67,18 @@ class TestAsyncParallelExecution:
 
     async def test_httpx_search_is_non_blocking(self) -> None:
         """Verify search_youtube uses async httpx, not blocking urllib."""
-        from youtube_agent.services.youtube import search_youtube
-
         # This would hang or be very slow if it was blocking
         # We'll just verify it's callable as async and raises expected error for empty query
-        from youtube_agent.services.youtube import YouTubeSearchError
+        from youtube_agent_orchestrator.services.youtube import YouTubeSearchError, search_youtube
 
         with pytest.raises(YouTubeSearchError):
             await search_youtube("")
 
     async def test_summarizer_uses_async_client(self) -> None:
         """Verify TranscriptSummarizer.summarize is async."""
-        from unittest.mock import AsyncMock, MagicMock
 
-        from youtube_agent.models.config import Settings
-        from youtube_agent.services.summarizer import TranscriptSummarizer
+        from youtube_agent_orchestrator.models.config import Settings
+        from youtube_agent_orchestrator.services.summarizer import TranscriptSummarizer
 
         # Create mock async client
         mock_client = MagicMock()

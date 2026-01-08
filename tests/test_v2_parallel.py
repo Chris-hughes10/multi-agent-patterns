@@ -10,10 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from youtube_agent_v2.agents.synthesizer import RequestAnalysis, SynthesizerAgent
-from youtube_agent_v2.core import AgentRegistry
-from youtube_agent_v2.core.models.handoff import HandoffResult
-
+from youtube_autonomous_agents.agents.synthesizer import RequestAnalysis, SynthesizerAgent
+from youtube_autonomous_agents.infra import AgentRegistry
+from youtube_autonomous_agents.models.handoff import HandoffResult
 
 # ============================================================================
 # RequestAnalysis Tests
@@ -235,7 +234,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_submit_fan_out_requires_two_intents(self, mock_registry):
         """Test that fan-out requires at least 2 intents."""
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         pool = SelfSelectingPool(mock_registry)
 
@@ -250,7 +249,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_submit_fan_out_posts_parallel_tasks(self, mock_registry):
         """Test that fan-out posts multiple tasks to the queue."""
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         pool = SelfSelectingPool(mock_registry)
 
@@ -262,7 +261,7 @@ class TestPoolFanOut:
 
         async def mock_wait(task_id, timeout=None):
             # Create a completed task for each parallel task
-            from youtube_agent_v2.core import Task, TaskResult, TaskStatus
+            from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
 
             task = Task(id=task_id, description="test", required_capabilities=[])
             task.status = TaskStatus.COMPLETED
@@ -275,7 +274,7 @@ class TestPoolFanOut:
         # Mock finding join task
         with patch.object(pool, "_find_join_task") as mock_find_join:
             # Create a mock join task
-            from youtube_agent_v2.core import Task, TaskResult, TaskStatus
+            from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
 
             join_task = Task(id="join-123", description="combine", required_capabilities=[])
             join_task.status = TaskStatus.COMPLETED
@@ -294,7 +293,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_task_group_tracking(self):
         """Test that TaskGroup correctly tracks completion."""
-        from youtube_agent_v2.patterns.self_selection import TaskGroup
+        from youtube_autonomous_agents.infra.pool import TaskGroup
 
         group = TaskGroup(
             id="test-group",
@@ -320,7 +319,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_task_group_handles_errors(self):
         """Test that TaskGroup tracks errors alongside results."""
-        from youtube_agent_v2.patterns.self_selection import TaskGroup
+        from youtube_autonomous_agents.infra.pool import TaskGroup
 
         group = TaskGroup(
             id="test-group",
@@ -382,8 +381,8 @@ class TestParallelIntegration:
     @pytest.mark.asyncio
     async def test_synthesizer_uses_pool_for_parallel(self, mock_registry):
         """Test that Synthesizer delegates parallel execution to pool."""
-        from youtube_agent_v2.core.models.task import TaskResult
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
+        from youtube_autonomous_agents.models.task import TaskResult
 
         mock_client = MagicMock()
         synthesizer = SynthesizerAgent(registry=mock_registry, client=mock_client)
@@ -428,8 +427,8 @@ class TestParallelIntegration:
     @pytest.mark.asyncio
     async def test_synthesizer_uses_pool_for_sequential(self, mock_registry):
         """Test that Synthesizer delegates sequential execution to pool."""
-        from youtube_agent_v2.core.models.task import TaskResult
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
+        from youtube_autonomous_agents.models.task import TaskResult
 
         mock_client = MagicMock()
         synthesizer = SynthesizerAgent(registry=mock_registry, client=mock_client)

@@ -7,13 +7,12 @@ Tests the three improvements:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from youtube_agent_v2.core.models.handoff import OperationTimeout
-from youtube_agent_v2.patterns.self_selection import TaskGroup
-
+from youtube_autonomous_agents.infra.pool import TaskGroup
+from youtube_autonomous_agents.models.handoff import OperationTimeout
 
 # ============================================================================
 # OperationTimeout Tests
@@ -122,7 +121,7 @@ class TestBaseAgentTimeout:
     @pytest.fixture
     def mock_agent(self):
         """Create a mock agent for testing timeout helpers."""
-        from youtube_agent_v2.core.base_agent import BaseAgent
+        from youtube_autonomous_agents.agents.base import BaseAgent
 
         class TestAgent(BaseAgent):
             @property
@@ -329,7 +328,7 @@ class TestSynthesizerPoolReuse:
     @pytest.fixture
     def mock_registry(self):
         """Create a mock registry."""
-        from youtube_agent_v2.core import AgentRegistry
+        from youtube_autonomous_agents.infra import AgentRegistry
 
         registry = MagicMock(spec=AgentRegistry)
         registry.all_agents.return_value = []
@@ -343,8 +342,8 @@ class TestSynthesizerPoolReuse:
 
     def test_synthesizer_accepts_external_pool(self, mock_registry, mock_client):
         """Test SynthesizerAgent can be initialized with external pool."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         external_pool = SelfSelectingPool(mock_registry)
 
@@ -358,7 +357,7 @@ class TestSynthesizerPoolReuse:
 
     def test_synthesizer_default_no_pool(self, mock_registry, mock_client):
         """Test SynthesizerAgent defaults to no external pool (CLI mode)."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
 
         synth = SynthesizerAgent(
             registry=mock_registry,
@@ -370,8 +369,8 @@ class TestSynthesizerPoolReuse:
     @pytest.mark.asyncio
     async def test_get_pool_creates_new_in_cli_mode(self, mock_registry, mock_client):
         """Test _get_pool creates new pool in CLI mode."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         synth = SynthesizerAgent(
             registry=mock_registry,
@@ -389,8 +388,8 @@ class TestSynthesizerPoolReuse:
     @pytest.mark.asyncio
     async def test_get_pool_returns_external_pool(self, mock_registry, mock_client):
         """Test _get_pool returns external pool in service mode."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         external_pool = SelfSelectingPool(mock_registry)
         await external_pool.start()
@@ -414,8 +413,8 @@ class TestSynthesizerPoolReuse:
         self, mock_registry, mock_client
     ):
         """Test _get_pool starts external pool if not running."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         external_pool = SelfSelectingPool(mock_registry)
         # Don't start it
@@ -440,8 +439,8 @@ class TestSynthesizerPoolReuse:
         self, mock_registry, mock_client
     ):
         """Test process_request shuts down pool in CLI mode."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         synth = SynthesizerAgent(
             registry=mock_registry,
@@ -450,35 +449,33 @@ class TestSynthesizerPoolReuse:
 
         # Mock analyze to return sequential
         with patch.object(synth, "_analyze_request") as mock_analyze:
-            from youtube_agent_v2.agents.synthesizer import RequestAnalysis
+            from youtube_autonomous_agents.agents.synthesizer import RequestAnalysis
 
             mock_analyze.return_value = RequestAnalysis.sequential("test")
 
             # Mock pool methods
             with patch.object(SelfSelectingPool, "submit_and_wait") as mock_submit:
-                from youtube_agent_v2.core.models.task import TaskResult
+                from youtube_autonomous_agents.models.task import TaskResult
 
                 mock_submit.return_value = TaskResult(success=True, data={"test": True})
 
-                with patch.object(SelfSelectingPool, "start"):
-                    with patch.object(
-                        SelfSelectingPool, "shutdown"
-                    ) as mock_shutdown:
-                        with patch.object(synth, "_synthesize_response") as mock_synth:
-                            mock_synth.return_value = "Response"
+                with patch.object(SelfSelectingPool, "start"), patch.object(
+                    SelfSelectingPool, "shutdown"
+                ) as mock_shutdown, patch.object(synth, "_synthesize_response") as mock_synth:
+                    mock_synth.return_value = "Response"
 
-                            await synth.process_request("test request")
+                    await synth.process_request("test request")
 
-                            # Shutdown should be called in CLI mode
-                            mock_shutdown.assert_called_once()
+                    # Shutdown should be called in CLI mode
+                    mock_shutdown.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_process_request_does_not_shutdown_external_pool(
         self, mock_registry, mock_client
     ):
         """Test process_request does NOT shut down external pool."""
-        from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-        from youtube_agent_v2.patterns.self_selection import SelfSelectingPool
+        from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
 
         external_pool = SelfSelectingPool(mock_registry)
 
@@ -490,24 +487,22 @@ class TestSynthesizerPoolReuse:
 
         # Mock analyze to return sequential
         with patch.object(synth, "_analyze_request") as mock_analyze:
-            from youtube_agent_v2.agents.synthesizer import RequestAnalysis
+            from youtube_autonomous_agents.agents.synthesizer import RequestAnalysis
 
             mock_analyze.return_value = RequestAnalysis.sequential("test")
 
             # Mock pool methods
             with patch.object(external_pool, "submit_and_wait") as mock_submit:
-                from youtube_agent_v2.core.models.task import TaskResult
+                from youtube_autonomous_agents.models.task import TaskResult
 
                 mock_submit.return_value = TaskResult(success=True, data={"test": True})
 
-                with patch.object(external_pool, "start"):
-                    with patch.object(
-                        external_pool, "shutdown"
-                    ) as mock_shutdown:
-                        with patch.object(synth, "_synthesize_response") as mock_synth:
-                            mock_synth.return_value = "Response"
+                with patch.object(external_pool, "start"), patch.object(
+                    external_pool, "shutdown"
+                ) as mock_shutdown, patch.object(synth, "_synthesize_response") as mock_synth:
+                    mock_synth.return_value = "Response"
 
-                            await synth.process_request("test request")
+                    await synth.process_request("test request")
 
-                            # Shutdown should NOT be called for external pool
-                            mock_shutdown.assert_not_called()
+                    # Shutdown should NOT be called for external pool
+                    mock_shutdown.assert_not_called()

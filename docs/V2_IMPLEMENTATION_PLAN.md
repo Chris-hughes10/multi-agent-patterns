@@ -29,7 +29,7 @@ Unlike V1's orchestrator (where a central LLM coordinates every step), V2 agents
 ### Architecture
 
 ```
-src/youtube_agent_v2/
+src/youtube_autonomous_agents/
 ├── core/
 │   ├── base_agent.py      # BaseAgent ABC with execute_autonomous()
 │   ├── registry.py        # AgentRegistry for discovery

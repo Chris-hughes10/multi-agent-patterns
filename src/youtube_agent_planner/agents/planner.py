@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING
 from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIChatClient
 
-from youtube_agent.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client
 from youtube_agent_planner.patterns.dag_executor import DAGStep, ExecutionDAG
 
 if TYPE_CHECKING:
-    from youtube_agent_v2.core.registry import AgentRegistry
+    from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 logger = logging.getLogger("youtube_agent_planner.planner")
 

@@ -13,17 +13,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from youtube_agent_v2.core import TaskResult
-from youtube_agent_v2.core.models.handoff import PartialResult
-from youtube_agent_v2.core.registry import AgentRegistry
-from youtube_agent_v2.core.session import Session
 from youtube_agent_planner.patterns.dag_executor import (
     DAGExecutor,
     DAGStep,
     ExecutionDAG,
     StepStatus,
 )
-
+from youtube_autonomous_agents.infra.registry import AgentRegistry
+from youtube_autonomous_agents.infra.session import Session
+from youtube_autonomous_agents.models import TaskResult
+from youtube_autonomous_agents.models.handoff import PartialResult
 
 # ============================================================================
 # ExecutionDAG Tests

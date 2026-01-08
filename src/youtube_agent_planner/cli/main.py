@@ -5,21 +5,20 @@ Provides DAG-based execution planning with explicit plan visibility.
 
 import asyncio
 import logging
-import sys
 
 import click
 
-from youtube_agent_v2.agents import (
+from youtube_agent_planner.agents.planner import PlannerAgent
+from youtube_agent_planner.patterns.dag_executor import DAGExecutor
+from youtube_autonomous_agents.agents import (
     SearchAgent,
     SummarizeAgent,
     TranscriptAgent,
     WriterAgent,
 )
-from youtube_agent_v2.core import AgentRegistry
-from youtube_agent_v2.core.models.handoff import PartialResult
-from youtube_agent_v2.core.session import Session
-from youtube_agent_planner.agents.planner import PlannerAgent
-from youtube_agent_planner.patterns.dag_executor import DAGExecutor
+from youtube_autonomous_agents.infra import AgentRegistry
+from youtube_autonomous_agents.infra.session import Session
+from youtube_autonomous_agents.models.handoff import PartialResult
 
 # Configure logging
 logging.basicConfig(
@@ -70,7 +69,7 @@ async def run_with_planning(
         dag = await planner.create_plan(request)
         click.echo(f" ✓ ({len(dag.steps)} steps)")
     except ValueError as e:
-        click.echo(f" ✗ Failed")
+        click.echo(" ✗ Failed")
         click.echo(f"Planning error: {e}", err=True)
         return None
 
@@ -122,7 +121,7 @@ def cli(verbose: bool) -> None:
     """
     if verbose:
         logging.getLogger("youtube_agent_planner").setLevel(logging.DEBUG)
-        logging.getLogger("youtube_agent_v2").setLevel(logging.DEBUG)
+        logging.getLogger("youtube_autonomous_agents").setLevel(logging.DEBUG)
 
 
 @cli.command()

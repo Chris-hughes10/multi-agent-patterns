@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from youtube_agent_v2.core import AgentRegistry, BaseAgent, Task, TaskResult
-from youtube_agent_v2.patterns.self_selection import SelfSelectingPool, run_with_self_selection
+from youtube_autonomous_agents.agents.base import BaseAgent
+from youtube_autonomous_agents.infra import AgentRegistry
+from youtube_autonomous_agents.infra.pool import SelfSelectingPool, run_with_self_selection
+from youtube_autonomous_agents.models import Task, TaskResult
 
 
 class MockAgent(BaseAgent):
@@ -256,7 +258,7 @@ class TestSelfSelectionWithRealAgents:
 
     async def test_registry_with_all_v2_agents_self_selection(self) -> None:
         """Test that all V2 agents work with self-selection pattern."""
-        from youtube_agent_v2.agents import (
+        from youtube_autonomous_agents.agents import (
             SearchAgent,
             SummarizeAgent,
             TranscriptAgent,

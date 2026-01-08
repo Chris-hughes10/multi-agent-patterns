@@ -1,6 +1,6 @@
 # V2 Implementation Notes
 
-Notes from building `youtube_agent_v2` - useful for the blog post.
+Notes from building `youtube_autonomous_agents` - useful for the blog post.
 
 ---
 

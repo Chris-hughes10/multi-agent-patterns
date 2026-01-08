@@ -2,8 +2,8 @@
 
 import pytest
 
-from youtube_agent.models.transcript import Transcript, TranscriptSegment
-from youtube_agent.tools.transcript import extract_video_id
+from youtube_agent_orchestrator.models.transcript import Transcript, TranscriptSegment
+from youtube_agent_orchestrator.tools.transcript import extract_video_id
 
 
 class TestExtractVideoId:

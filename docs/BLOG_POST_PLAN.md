@@ -182,7 +182,7 @@ agents → tools → services  ← test with real code
 |----------|--------|---------|
 | Full architecture diagram | README.md | Visual overview |
 | Design rationale | DESIGN_PHILOSOPHY.md | Detailed explanations |
-| Working code | src/youtube_agent/ | Reference implementation |
+| Working code | src/youtube_agent_orchestrator/ | Reference implementation |
 | Test examples | tests/ | Testing patterns |
 
 ---
@@ -285,7 +285,7 @@ User → Event-Driven Task Queue
 **Key insight**: Event-driven notifications solve the polling overhead problem (original self-selection polled every 50ms).
 
 **When to use**:
-- Any youtube_agent_v2 task (this is the foundation)
+- Any youtube_autonomous_agents task (this is the foundation)
 - Scalable systems with many agents
 - Need natural load balancing
 
@@ -470,9 +470,9 @@ Do you need an inspectable plan upfront?
 
 | Material | Source | Purpose |
 |----------|--------|---------|
-| Pattern implementations | `src/youtube_agent_v2/patterns/` | Reference code |
-| Session + execution tracking | `src/youtube_agent_v2/core/session.py` | State management |
-| Intent routing | `src/youtube_agent_v2/core/intent_router.py` | Semantic routing |
+| Pattern implementations | `src/youtube_autonomous_agents/patterns/` | Reference code |
+| Session + execution tracking | `src/youtube_autonomous_agents/core/session.py` | State management |
+| Intent routing | `src/youtube_autonomous_agents/core/intent_router.py` | Semantic routing |
 | E2E test outputs | CLI runs | Real-world examples |
 
 ---

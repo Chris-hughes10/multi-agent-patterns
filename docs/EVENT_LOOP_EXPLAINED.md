@@ -117,7 +117,7 @@ Response to user
 
 ### The Orchestrator Class
 
-From `src/youtube_agent/agents/orchestrator.py`:
+From `src/youtube_agent_orchestrator/agents/orchestrator.py`:
 
 ```python
 class OrchestratorAgent:
@@ -181,7 +181,7 @@ Not all code is natively async. Here's how we handle different scenarios in our 
 
 ### Pattern 1: Native Async Libraries
 
-For libraries with async support, use them directly. From `src/youtube_agent/services/youtube.py`:
+For libraries with async support, use them directly. From `src/youtube_agent_orchestrator/services/youtube.py`:
 
 ```python
 import httpx
@@ -225,7 +225,7 @@ async def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchRe
 
 ### Pattern 2: Thread Wrapper for Sync Libraries
 
-Some libraries don't support async. Wrap them with `asyncio.to_thread()`. From `src/youtube_agent/services/youtube.py`:
+Some libraries don't support async. Wrap them with `asyncio.to_thread()`. From `src/youtube_agent_orchestrator/services/youtube.py`:
 
 ```python
 def _fetch_transcript_sync(
@@ -276,7 +276,7 @@ async def fetch_transcript(
 
 ### Pattern 3: Async LLM Clients
 
-For Azure OpenAI, use the async client. From `src/youtube_agent/services/summarizer.py`:
+For Azure OpenAI, use the async client. From `src/youtube_agent_orchestrator/services/summarizer.py`:
 
 ```python
 from openai import AsyncAzureOpenAI
@@ -328,7 +328,7 @@ class TranscriptSummarizer:
 
 ### Pattern 4: File I/O with Thread Wrapper
 
-For file operations, wrap with `asyncio.to_thread()`. From `src/youtube_agent/tools/writer.py`:
+For file operations, wrap with `asyncio.to_thread()`. From `src/youtube_agent_orchestrator/tools/writer.py`:
 
 ```python
 def _write_markdown_sync(content: str, filename: str, output_dir: str) -> str:
@@ -448,7 +448,7 @@ class TestAsyncParallelExecution:
             await asyncio.sleep(0.1)  # 100ms delay
             return f"Response from {agent_name}"
 
-        from youtube_agent.agents.orchestrator import OrchestratorAgent
+        from youtube_agent_orchestrator.agents.orchestrator import OrchestratorAgent
 
         orchestrator = OrchestratorAgent()
         orchestrator._delegate = slow_delegate  # type: ignore

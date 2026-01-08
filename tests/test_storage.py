@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from youtube_agent.models.transcript import (
+from youtube_agent_orchestrator.models.transcript import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
 )
-from youtube_agent.tools.storage import (
+from youtube_agent_orchestrator.tools.storage import (
     StoredTranscript,
     TranscriptStorage,
     load_transcript,

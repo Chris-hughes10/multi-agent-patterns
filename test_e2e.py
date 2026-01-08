@@ -10,22 +10,22 @@ logging.basicConfig(
 )
 
 # Set specific loggers to INFO to see key events
-logging.getLogger("youtube_agent_v2.self_selection").setLevel(logging.INFO)
-logging.getLogger("youtube_agent_v2.agents.search").setLevel(logging.INFO)
-logging.getLogger("youtube_agent_v2.agents.transcript").setLevel(logging.INFO)
-logging.getLogger("youtube_agent_v2.agents.summarize").setLevel(logging.INFO)
-logging.getLogger("youtube_agent_v2.agents.writer").setLevel(logging.INFO)
+logging.getLogger("youtube_autonomous_agents.self_selection").setLevel(logging.INFO)
+logging.getLogger("youtube_autonomous_agents.agents.search").setLevel(logging.INFO)
+logging.getLogger("youtube_autonomous_agents.agents.transcript").setLevel(logging.INFO)
+logging.getLogger("youtube_autonomous_agents.agents.summarize").setLevel(logging.INFO)
+logging.getLogger("youtube_autonomous_agents.agents.writer").setLevel(logging.INFO)
 
 
 async def main():
-    from youtube_agent_v2.agents import (
+    from youtube_autonomous_agents.agents import (
         SearchAgent,
         SummarizeAgent,
         TranscriptAgent,
         WriterAgent,
     )
-    from youtube_agent_v2.agents.synthesizer import SynthesizerAgent
-    from youtube_agent_v2.core import AgentRegistry
+    from youtube_autonomous_agents.agents.synthesizer import SynthesizerAgent
+    from youtube_autonomous_agents.infra import AgentRegistry
 
     # Create registry with all agents
     registry = AgentRegistry()
