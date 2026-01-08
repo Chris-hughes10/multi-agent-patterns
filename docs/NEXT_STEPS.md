@@ -29,7 +29,8 @@ youtube_autonomous_agents/
 │   ├── writer.py     # WriterAgent
 │   └── synthesizer.py # User-facing entry point
 ├── application/      # Application layer
-│   └── cli.py        # CLI using SynthesizerAgent
+│   ├── cli.py        # Click CLI commands
+│   └── main.py       # Driver functions for programmatic use
 ├── infra/            # Infrastructure layer
 │   ├── pool.py       # SelfSelectingPool coordination
 │   ├── registry.py   # AgentRegistry
@@ -40,6 +41,23 @@ youtube_autonomous_agents/
 └── models/           # Shared kernel
     ├── task.py       # Task, TaskResult, TaskStatus
     └── handoff.py    # HandoffResult, OperationTimeout
+```
+
+### V1 Application Layer (Refactored)
+
+V1 now follows the same `application/` pattern as V2:
+
+```
+youtube_agent_orchestrator/
+├── application/      # Application layer
+│   ├── cli.py        # Click CLI commands
+│   ├── main.py       # Driver functions (process_request, etc.)
+│   └── status.py     # Human-friendly status monitoring
+├── agents/           # LLM agents
+├── tools/            # LLM-callable tools
+├── services/         # Business logic
+├── models/           # Data structures
+└── infra/            # Framework plumbing
 ```
 
 ### CLI Entry Points
@@ -69,7 +87,14 @@ uv run youtube-agent-v2 chat -t 3 -r "Find videos about cooking"
 **Implementation:** Uses a general `context: dict` parameter pattern that flows through:
 - `cli.py` → `main.py` → `synthesizer.py` → pool → agents
 
-### 2. Blog Post Series
+### ~~2. V1 Refactor for Consistency~~ ✅ DONE
+
+Refactored V1 to match V2's application layer pattern:
+- Renamed `cli/` → `application/`
+- Converted argparse to Click
+- Split into `cli.py` (commands) + `main.py` (driver functions)
+
+### 3. Blog Post Series
 
 Two-part blog series. Full outline in `docs/BLOG_POST_PLAN.md`.
 

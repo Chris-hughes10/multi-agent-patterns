@@ -327,7 +327,7 @@ This prevents the LLM from inventing agents like "extract_parameters" or "filter
 | DAGExecutor | `src/youtube_agent_planner/patterns/dag_executor.py` |
 | ExecutionDAG | `src/youtube_agent_planner/patterns/dag_executor.py` |
 | DAGStep | `src/youtube_agent_planner/patterns/dag_executor.py` |
-| Session | `src/youtube_agent_planner/core/session.py` |
+| Session | `src/youtube_autonomous_agents/infra/session.py` (shared) |
 | CLI Entry | `src/youtube_agent_planner/cli/main.py` |
 
 ## Creating Plans Programmatically
