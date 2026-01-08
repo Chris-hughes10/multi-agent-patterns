@@ -155,6 +155,7 @@ class SynthesizerAgent:
         self,
         user_request: str,
         timeout: float | None = None,
+        context: dict | None = None,
     ) -> str:
         """Process a user request through the multi-agent system.
 
@@ -163,9 +164,11 @@ class SynthesizerAgent:
 
         :param user_request: The user's natural language request
         :param timeout: Optional override for request timeout
+        :param context: Optional context dict with config (e.g., max_transcripts)
         :return: Synthesized response for the user
         """
         request_timeout = timeout or self._timeout
+        base_context = context or {}
 
         # Analyze request for parallelism
         analysis = await self._analyze_request(user_request)
@@ -179,7 +182,7 @@ class SynthesizerAgent:
                 result = await pool.submit_fan_out_and_wait(
                     intents=analysis.parallel_intents,
                     join_intent=analysis.join_intent or user_request,
-                    context={"original_request": user_request},
+                    context={"original_request": user_request, **base_context},
                     timeout=request_timeout,
                 )
             else:
@@ -187,7 +190,7 @@ class SynthesizerAgent:
                 result = await pool.submit_and_wait(
                     description=user_request,
                     capabilities=[],  # Let routing figure it out
-                    context={"goal": user_request},
+                    context={"goal": user_request, **base_context},
                     timeout=request_timeout,
                 )
         finally:

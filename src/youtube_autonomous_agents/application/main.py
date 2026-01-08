@@ -56,6 +56,7 @@ def create_synthesizer(registry: AgentRegistry | None = None) -> SynthesizerAgen
 async def process_request(
     request: str,
     timeout: float = 120.0,
+    context: dict | None = None,
     synthesizer: SynthesizerAgent | None = None,
 ) -> str:
     """Process a user request through the autonomous agent system.
@@ -67,13 +68,14 @@ async def process_request(
 
     :param request: Natural language user request
     :param timeout: Request timeout in seconds
+    :param context: Optional context dict with config (e.g., max_transcripts)
     :param synthesizer: Optional pre-created synthesizer (creates new if None)
     :return: Synthesized response string
     """
     if synthesizer is None:
         synthesizer = create_synthesizer()
 
-    return await synthesizer.process_request(request, timeout=timeout)
+    return await synthesizer.process_request(request, timeout=timeout, context=context)
 
 
 def list_agents() -> list[dict]:

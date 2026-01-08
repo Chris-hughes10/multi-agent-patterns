@@ -94,8 +94,10 @@ def agents() -> None:
 
 @cli.command()
 @click.option("-r", "--request", "user_request", default=None, help="Single request (interactive if not provided)")
-def chat(user_request: str | None) -> None:
+@click.option("-t", "--max-transcripts", default=5, help="Maximum transcripts to fetch (default: 5)")
+def chat(user_request: str | None, max_transcripts: int) -> None:
     """Interactive chat mode with the SynthesizerAgent."""
+    context = {"max_transcripts": max_transcripts}
 
     async def run_chat() -> None:
         synth = create_synthesizer()
@@ -103,12 +105,13 @@ def chat(user_request: str | None) -> None:
         click.echo("\nYouTube Autonomous Agents - Interactive Mode")
         click.echo("=" * 50)
         click.echo("Powered by SynthesizerAgent with autonomous coordination.")
+        click.echo(f"Max transcripts: {max_transcripts}")
         click.echo("Type 'exit' or 'quit' to stop.\n")
 
         # Single request mode
         if user_request:
             click.echo("[Synthesizer] Processing request...")
-            result = await process_request(user_request, synthesizer=synth)
+            result = await process_request(user_request, context=context, synthesizer=synth)
             click.echo(result)
             return
 
@@ -125,7 +128,7 @@ def chat(user_request: str | None) -> None:
                     break
 
                 click.echo("\n[Synthesizer] Processing...")
-                result = await process_request(user_input, synthesizer=synth)
+                result = await process_request(user_input, context=context, synthesizer=synth)
                 click.echo(f"\nAgent: {result}\n")
 
             except KeyboardInterrupt:
