@@ -132,9 +132,13 @@ class YouTubeTranscriptFetcher:
             )
 
         except TranscriptsDisabled:
-            raise TranscriptFetchError(
-                video_id, "Transcripts are disabled for this video"
-            ) from None
+            error_msg = "Transcripts are disabled for this video"
+            if not self._proxy_url:
+                error_msg += (
+                    " (Note: If running in a cloud/data center environment, "
+                    "YouTube may be blocking your IP. Try setting PROXY_URL in .env)"
+                )
+            raise TranscriptFetchError(video_id, error_msg) from None
         except NoTranscriptFound:
             raise TranscriptFetchError(
                 video_id, f"No transcript found for languages: {languages}"
@@ -142,7 +146,17 @@ class YouTubeTranscriptFetcher:
         except VideoUnavailable:
             raise TranscriptFetchError(video_id, "Video is unavailable") from None
         except Exception as e:
-            raise TranscriptFetchError(video_id, str(e)) from e
+            error_msg = str(e)
+            # Detect potential proxy-related issues
+            if not self._proxy_url and any(
+                keyword in error_msg.lower()
+                for keyword in ["timeout", "connection", "blocked", "forbidden", "403"]
+            ):
+                error_msg += (
+                    " (Possible network/IP block. If running in a cloud environment, "
+                    "set PROXY_URL in .env to use a residential proxy)"
+                )
+            raise TranscriptFetchError(video_id, error_msg) from e
 
 
 def extract_video_id(url_or_id: str) -> str:
