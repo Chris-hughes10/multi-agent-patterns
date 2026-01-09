@@ -532,6 +532,18 @@ These principles apply regardless of which agent framework you choose:
 
 ---
 
+## View the Code
+
+All patterns described here are implemented in the reference codebase:
+
+- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
+- **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
+- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
+
+The code is meant to be read and learned from, not just used. Star the repo if you find it useful! ⭐
+
+---
+
 ## Conclusion
 
 The question I started with was: can you build a multi-agent system that doesn't become an unmaintainable mess?
