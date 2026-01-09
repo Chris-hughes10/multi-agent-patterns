@@ -63,6 +63,40 @@ def search_and_summarize(query: str) -> str:
     return summary
 ```
 
+**After: Layered architecture**
+
+```python
+# Tool layer (agents/tools/) - LLM interface
+async def fetch_video_transcript(video_id: str) -> str:
+    """Fetch transcript - thin wrapper returning string for LLM."""
+    result = await youtube_service.fetch_transcript(video_id)
+    return format_transcript_for_llm(result)
+
+# Service layer (services/) - business logic
+class YouTubeService:
+    async def fetch_transcript(self, video_id: str) -> TranscriptResult:
+        """Fetch transcript - rich typed object returned."""
+        transcript = await YouTubeTranscriptApi.get(video_id)
+        metadata = await self._fetch_metadata(video_id)
+        return TranscriptResult(
+            transcript=transcript,
+            metadata=metadata,
+            video_id=video_id
+        )
+
+# Model layer (models/) - domain objects
+@dataclass
+class TranscriptResult:
+    transcript: list[dict[str, Any]]
+    metadata: VideoMetadata
+    video_id: str
+
+# Now each component is:
+# - Testable in isolation (mock the service, not external APIs)
+# - Reusable across agents
+# - Focused on a single concern
+```
+
 This works for a demo. But it's untestable without hitting real APIs, impossible to reuse components, and will become incomprehensible as we add features.
 
 The core insight that changed our architecture: **LLM-callable functions have fundamentally different concerns than business logic**. Separating them unlocks testability and reusability.
