@@ -16,7 +16,7 @@ The codebase follows a layered architecture where each layer has a single, well-
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      cli/                               │
+│                   application/                          │
 │              User-facing command interface              │
 └─────────────────────────────────────────────────────────┘
                            │
@@ -55,7 +55,7 @@ The codebase follows a layered architecture where each layer has a single, well-
 
 | Layer | One-Sentence Description | Contains |
 |-------|-------------------------|----------|
-| `cli/` | Parses user input and displays output | Argument parsing, status display, entry points |
+| `application/` | Parses user input and displays output | Argument parsing, status display, entry points |
 | `agents/` | Defines LLM personas and their capabilities | Instructions, tool bindings, factory functions |
 | `tools/` | Exposes services as LLM-callable functions | String-formatted wrappers, parameter validation |
 | `services/` | Implements business logic | Classes with real functionality, domain rules |

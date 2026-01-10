@@ -37,11 +37,16 @@ dev = [
 ]
 
 [project.scripts]
-youtube-agent = "youtube_agent.cli.main:main"
+youtube-agent = "youtube_agent_orchestrator.application.cli:main"
+youtube-autonomous = "youtube_autonomous_agents.application.cli:main"
+youtube-agent-planner = "youtube_agent_planner.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/youtube_agent_orchestrator", "src/youtube_autonomous_agents", "src/youtube_agent_planner"]
 
 [dependency-groups]
 dev = [
@@ -75,7 +80,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["youtube_agent"]
+known-first-party = ["youtube_agent_orchestrator", "youtube_autonomous_agents", "youtube_agent_planner"]
 
 [tool.ruff.format]
 quote-style = "double"

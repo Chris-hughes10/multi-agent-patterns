@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from youtube_agent.models.transcript import (
+from youtube_agent_orchestrator.models.transcript import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
 )
-from youtube_agent.tools.summarize import (
+from youtube_agent_orchestrator.tools.summarize import (
     SummarizationError,
     TranscriptSummarizer,
     summarize_transcript,
@@ -66,7 +66,7 @@ class TestTranscriptSummarizer:
 
     def test_raises_error_when_not_configured(self) -> None:
         """Should raise SummarizationError when Azure OpenAI is not configured."""
-        from youtube_agent.models.config import Settings
+        from youtube_agent_orchestrator.models.config import Settings
 
         # Create settings explicitly with no Azure config
         unconfigured_settings = Settings(
@@ -178,7 +178,7 @@ class TestSummarizationIntegration:
         except SummarizationError:
             pytest.skip("Azure OpenAI not configured")
 
-        from youtube_agent.services.storage import TranscriptStorage
+        from youtube_agent_orchestrator.services.storage import TranscriptStorage
 
         storage = TranscriptStorage(storage_dir=tmp_path)
 
@@ -203,7 +203,7 @@ class TestSummarizationIntegration:
         except SummarizationError:
             pytest.skip("Azure OpenAI not configured")
 
-        from youtube_agent.services.storage import TranscriptStorage
+        from youtube_agent_orchestrator.services.storage import TranscriptStorage
 
         storage = TranscriptStorage(storage_dir=tmp_path)
 
@@ -227,7 +227,7 @@ class TestMockedSummarization:
         self, sample_transcript_result: TranscriptResult
     ) -> None:
         """Should format messages correctly for the Azure OpenAI client."""
-        from youtube_agent.models.config import Settings
+        from youtube_agent_orchestrator.models.config import Settings
 
         # Create mock async client
         mock_client = MagicMock()
@@ -264,7 +264,7 @@ class TestMockedSummarization:
         self, sample_transcript_result: TranscriptResult
     ) -> None:
         """Should wrap API errors in SummarizationError."""
-        from youtube_agent.models.config import Settings
+        from youtube_agent_orchestrator.models.config import Settings
 
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))

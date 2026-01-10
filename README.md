@@ -139,7 +139,7 @@ The system uses a **layered architecture** with clear separation of concerns:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                        cli/                             │
+│                     application/                        │
 │                 Command-line interface                  │
 └─────────────────────────────────────────────────────────┘
                            │
@@ -188,6 +188,97 @@ The orchestrator coordinates four specialized agents:
 - **Context Injection**: `TranscriptContextProvider` tells the orchestrator what's cached before each call
 
 See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural decisions.
+
+## V2: Autonomous Multi-Agent System
+
+YouTube Agent V2 (`youtube-agent-v2`) uses **autonomous agents with event-driven self-selection** - a unified coordination pattern where agents reason about goals and hand off work via a shared queue.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    User Request                         │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│              Event-Driven Task Queue                    │
+└────────────────────────┬────────────────────────────────┘
+                         │ (agents notified instantly)
+         ┌───────────────┼───────────────┐
+         ↓               ↓               ↓
+    ┌─────────┐     ┌─────────┐     ┌─────────┐
+    │ Search  │     │Transcr. │     │ Writer  │
+    └────┬────┘     └────┬────┘     └────┬────┘
+         └───────────────┴───────────────┘
+                         ↓
+              can_handle? → claim → execute
+                         ↓
+              ┌──────────┴──────────┐
+              │                     │
+           complete            handoff
+              ↓                     ↓
+           DONE              Post new task
+                             (loop continues)
+```
+
+**Key features:**
+- **Event-driven queue**: Zero CPU usage when idle (no polling)
+- **Self-selection**: Agents compete to claim tasks they can handle
+- **Autonomous handoffs**: Agents reason about the goal and hand off to the next agent
+- **State accumulation**: Context builds up as the chain progresses
+
+### Quick Start
+
+```bash
+# List registered agents
+uv run youtube-agent-v2 agents
+
+# Simple commands
+uv run youtube-agent-v2 search "python async tutorial"
+uv run youtube-agent-v2 transcript VIDEO_ID
+
+# Interactive chat
+uv run youtube-agent-v2 chat
+
+# Single request - agents chain automatically
+uv run youtube-agent-v2 chat -r "Find videos about cooking and summarize them"
+
+# Limit transcripts fetched (default: 5)
+uv run youtube-agent-v2 chat -t 3 -r "Find BBQ videos and summarize them"
+```
+
+### Example Flow
+
+```bash
+uv run youtube-agent-v2 chat -r "Find pork loin videos and summarize cooking temps"
+```
+
+The agents chain automatically based on the goal:
+1. **SearchAgent** finds videos → hands off to TranscriptAgent
+2. **TranscriptAgent** fetches transcripts → hands off to SummarizeAgent
+3. **SummarizeAgent** generates summary → completes (or hands off to WriterAgent if "save" is mentioned)
+
+### DAG Planner (Separate Package)
+
+For complex multi-step workflows with explicit planning and parallel execution, use the separate `youtube-agent-planner`:
+
+```bash
+uv run youtube-agent-planner chat -r "Find videos about grilling and summarize them"
+```
+
+The planner creates an execution DAG upfront with dependency tracking and parallel execution. See [docs/PLANNER_DAG_PATTERN.md](docs/PLANNER_DAG_PATTERN.md) for details.
+
+### V1 vs V2
+
+| Aspect | V1 Orchestrator | V2 Autonomous |
+|--------|-----------------|---------------|
+| **Control** | LLM decides every step | Agents self-coordinate via queue |
+| **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
+| **Command** | `youtube-agent` | `youtube-agent-v2` |
+
+See [docs/AUTONOMOUS_PATTERN.md](docs/AUTONOMOUS_PATTERN.md) for detailed architecture documentation.
+
+---
 
 ## Development
 

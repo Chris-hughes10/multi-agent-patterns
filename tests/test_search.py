@@ -2,13 +2,13 @@
 
 import pytest
 
-from youtube_agent.models.search import VideoSearchResult
-from youtube_agent.services.youtube import (
+from youtube_agent_orchestrator.models.search import VideoSearchResult
+from youtube_agent_orchestrator.services.youtube import (
     YouTubeSearchError,
     _extract_videos_from_html,
     search_youtube,
 )
-from youtube_agent.tools.search import search_youtube_formatted
+from youtube_agent_orchestrator.tools.search import search_youtube_formatted
 
 
 class TestVideoSearchResult:
@@ -104,7 +104,7 @@ class TestSearchYoutubeFormatted:
         async def mock_search(_query: str, _max_results: int = 5) -> list:
             return []
 
-        monkeypatch.setattr("youtube_agent.tools.search.search_youtube", mock_search)
+        monkeypatch.setattr("youtube_agent_orchestrator.tools.search.search_youtube", mock_search)
         result = await search_youtube_formatted("nonexistent video xyz123")
         assert "No videos found" in result
 
@@ -124,7 +124,7 @@ class TestSearchYoutubeFormatted:
         async def mock_search(_query: str, _max_results: int = 5) -> list:
             return mock_results
 
-        monkeypatch.setattr("youtube_agent.tools.search.search_youtube", mock_search)
+        monkeypatch.setattr("youtube_agent_orchestrator.tools.search.search_youtube", mock_search)
         result = await search_youtube_formatted("test")
         assert "Test Video Title" in result
         assert "Test Channel" in result
