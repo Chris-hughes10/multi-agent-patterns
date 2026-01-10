@@ -1,6 +1,10 @@
-# Planning Multi-Agent Workflows: Upfront Plans with Mixed Model Tiers
+# Planning Multi-Agent Workflows: Trading Adaptability for Predictability
 
-In Parts 1 and 2, we explored *who* coordinates multi-agent workflows: a central orchestrator (V1) versus distributed autonomous agents (V2). The autonomous pattern was elegant - agents reasoning about goals and handing off to each other - but it revealed an interesting tradeoff.
+*This is Part 3 of a series on building multi-agent systems. [Part 1](part1_architecture.md) covered clean architecture for agents (tools vs services, domain-driven design). [Part 2](part2_autonomous.md) explored autonomous agent coordination (goal-aware reasoning, event-driven handoffs).*
+
+---
+
+In Parts 1 and 2, we explored *who* coordinates multi-agent workflows: a central orchestrator (V1) versus distributed autonomous agents (V2). The autonomous pattern was elegant - agents reasoning about goals and handing off to each other - but it revealed an interesting trade-off.
 
 Every agent in V2 needs to reason about the user's goal. That's a lot of LLM calls:
 
@@ -23,7 +27,7 @@ This led us to explore a different dimension: **What if we front-load the intell
 
 - Why autonomous agents have high per-step LLM costs
 - The economic argument for upfront planning
-- How to use powerful models for planning, cheaper models for execution
+- How the Planner pattern *enables* strategic model selection
 - Implementing DAG-based execution with dependency tracking
 - When predictability matters more than adaptability
 - Tradeoffs between the three patterns we've explored
@@ -89,12 +93,15 @@ Total: 10 LLM calls (all need capable models for reasoning)
 
 ### The Economic Insight
 
-**What if we could:**
+The Planner pattern opens an architectural opportunity:
+
 1. Use a powerful model ONCE to create a complete plan
-2. Use cheaper/faster models to execute the plan mechanically
+2. Execute the plan mechanically (potentially with cheaper/faster models)
 3. Trade adaptability for predictable costs
 
-This is the **Planner + DAG pattern**.
+This is the **Planner + DAG pattern**. The core benefit is *reduced redundant reasoning* - instead of every agent re-evaluating "is the goal satisfied?", you decide the workflow once upfront.
+
+> **Note on model tiers**: While the pattern *enables* using different model tiers for planning vs execution, our reference implementation uses consistent model quality throughout. The architectural benefit is immediate (inspectable plans, reduced reasoning overhead); model tier optimization is a straightforward enhancement the pattern supports.
 
 ---
 
@@ -321,7 +328,9 @@ results["search_asyncio"] = {
 {"video_id": "abc123"}
 ```
 
-### Model Tier Strategy
+### Model Tier Strategy (Architectural Pattern)
+
+The DAG structure enables a powerful optimization: assign different model tiers based on task complexity. Here's what this *could* look like:
 
 ```python
 def get_model_for_tier(tier: str) -> str:
@@ -350,19 +359,29 @@ async def execute_step(step: DAGStep, agent: BaseAgent, results: dict) -> Any:
     return result
 ```
 
+While our reference implementation doesn't implement model tier selection (all agents use the same model), the pattern makes this optimization straightforward to add. The key insight is that once you have an explicit plan, you can make informed decisions about resource allocation per step.
+
 ---
 
 ## Comparison: Three Patterns
 
-### Cost Analysis (Real Numbers)
+### Cost Analysis
 
-| Pattern | Planning Calls | Execution Calls | Total Calls | Model Tiers | Est. Cost* |
-|---------|---------------|-----------------|-------------|-------------|------------|
-| **V1 Orchestrator** | 0 | 6 (3 decisions + 3 executions) | 6 | Mixed | $0.08 |
-| **V2 Autonomous** | 0 | 10 (5 routing + 5 reasoning) | 10 | All capable | $0.15 |
-| **V3 Planner+DAG** | 1 (powerful) | 3 (2 cheap + 1 capable) | 4 | Strategic | $0.05 |
+| Pattern | LLM Calls | Token Usage* | Est. Cost** | Key Characteristic |
+|---------|-----------|--------------|-------------|-------------------|
+| **V1 Orchestrator** | ~6 | ~5K in / ~2K out | ~$0.04 | Context grows at center |
+| **V2 Autonomous** | ~10 | ~8K in / ~3K out | ~$0.06 | Every agent reasons about goal |
+| **V3 Planner+DAG** | ~4 | ~3K in / ~1.5K out | ~$0.03 | Single planning call, then execute |
 
-*Estimated costs for "search → transcript → summarize" workflow
+*Token estimates for a "search → transcript → summarize" workflow.*
+**Based on GPT-5.2 pricing: $1.75/1M input, $14.00/1M output tokens.*
+
+The cost differences may seem small per-request, but they compound at scale. Processing 10,000 requests daily:
+- V1: ~$400/day
+- V2: ~$600/day
+- V3: ~$300/day
+
+The key insight isn't just raw cost - it's **predictability**. With V3, you know the token budget before execution starts.
 
 ### When to Use Each Pattern
 
@@ -378,6 +397,51 @@ async def execute_step(step: DAGStep, agent: BaseAgent, results: dict) -> Any:
 | Cost is primary constraint? | **V3 Planner+DAG** | Strategic model tier usage |
 | Adaptability is primary constraint? | **V2 Autonomous** | Responds to what it finds |
 | Simplicity is primary constraint? | **V1 Orchestrator** | Well-understood pattern |
+
+### Quick Decision Tree
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│         Which Multi-Agent Pattern Should You Use?           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+              ┌───────────────────────────────┐
+              │ Do you need conversational    │
+              │ back-and-forth with the user? │
+              └───────────────────────────────┘
+                     │              │
+                    YES             NO
+                     │              │
+                     ▼              ▼
+              ┌──────────┐   ┌─────────────────────────────┐
+              │    V1    │   │ Do agents need to adapt     │
+              │Orchestrator│  │ based on what they find?    │
+              └──────────┘   └─────────────────────────────┘
+                                    │              │
+                                   YES             NO
+                                    │              │
+                                    ▼              ▼
+                             ┌──────────┐   ┌─────────────────────┐
+                             │    V2    │   │ Do you need to      │
+                             │Autonomous│   │ inspect/approve the │
+                             └──────────┘   │ plan before running?│
+                                            └─────────────────────┘
+                                                   │         │
+                                                  YES        NO
+                                                   │         │
+                                                   ▼         ▼
+                                            ┌──────────┐  ┌──────────┐
+                                            │    V3    │  │ Start    │
+                                            │ Planner  │  │ with V1  │
+                                            │  + DAG   │  │(simplest)│
+                                            └──────────┘  └──────────┘
+```
+
+**The short version:**
+- **V1 Orchestrator**: Start here. Simple, conversational, well-understood.
+- **V2 Autonomous**: When workflows should emerge from agent reasoning.
+- **V3 Planner+DAG**: When you need predictability, auditability, or cost control.
 
 ### Design Space Summary
 
@@ -534,7 +598,7 @@ The insight that made the Planner pattern compelling wasn't just predictability 
 
 Autonomous agents (V2) are elegant, but every agent needs to reason about the goal. That means every agent needs a capable model. When you're processing hundreds or thousands of requests, those costs add up.
 
-The Planner pattern lets you be strategic: use a powerful model once to create a complete plan, then use cheaper models to execute the plan mechanically. For high-volume scenarios, this can reduce costs by 60% compared to autonomous agents.
+The Planner pattern lets you be strategic: use a powerful model once to create a complete plan, then execute the plan with reduced per-step overhead. For high-volume scenarios, this can significantly reduce costs compared to autonomous agents.
 
 But it's a tradeoff: you sacrifice the adaptability that makes autonomous agents powerful. The workflow can't change course based on what it finds. If that adaptability matters more than cost, autonomous agents are still the right choice.
 
@@ -559,4 +623,14 @@ Multi-agent systems aren't mysterious. They're software systems with clear archi
 
 ---
 
-*All three patterns are implemented in the [reference codebase](https://github.com/YOUR_USERNAME/agents-explore). The code is meant to be read and learned from, not just used.*
+## View the Code
+
+All patterns described in this series are implemented in the reference codebase:
+
+- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - Covered in Part 1
+- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_autonomous_agents)** - Covered in Part 2
+- **[V3 Planner+DAG Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_planner)** - This post's focus
+- **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
+- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
+
+The code is meant to be read and learned from, not just used. Star the repo if you find it useful!
