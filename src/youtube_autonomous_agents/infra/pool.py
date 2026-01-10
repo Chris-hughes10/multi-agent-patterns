@@ -543,10 +543,12 @@ class SelfSelectingPool:
 
         start_time = time.time()
 
-        # Ensure goal is set in context for autonomous execution
+        # Ensure goal and intent are set in context for autonomous execution
         task_context = context.copy() if context else {}
         if "goal" not in task_context:
             task_context["goal"] = description
+        if "intent" not in task_context:
+            task_context["intent"] = description
 
         task = Task(
             id=str(uuid4()),

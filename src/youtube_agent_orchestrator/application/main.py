@@ -87,14 +87,14 @@ async def process_request(
     return await orchestrator.run(request)
 
 
-def search_videos(query: str, max_results: int = 5) -> str:
+async def search_videos(query: str, max_results: int = 5) -> str:
     """Search YouTube for videos matching the query.
 
     :param query: Search query string
     :param max_results: Maximum number of results to return
     :return: Formatted search results string
     """
-    return search_youtube_formatted(query, max_results)
+    return await search_youtube_formatted(query, max_results)
 
 
 def get_transcript(video: str, save: bool = False) -> TranscriptResult:

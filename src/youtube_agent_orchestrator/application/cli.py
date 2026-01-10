@@ -48,7 +48,7 @@ def cli(ctx: click.Context, debug: bool) -> None:
 @click.option("-n", "--max-results", default=5, help="Maximum results (default: 5)")
 def search(query: str, max_results: int) -> None:
     """Search YouTube for videos matching QUERY."""
-    result = search_videos(query, max_results)
+    result = asyncio.run(search_videos(query, max_results))
     click.echo(result)
 
 
