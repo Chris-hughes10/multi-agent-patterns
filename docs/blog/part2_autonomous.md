@@ -590,28 +590,124 @@ Better to fetch transcripts unnecessarily than to miss information the user want
 
 ---
 
+## Debugging Autonomous Chains
+
+**The Challenge**: When execution paths aren't predetermined, debugging requires different strategies than traditional orchestration.
+
+### Built-in Observability
+
+**1. Execution Path Logging**
+
+The system tracks exactly which agents ran and how they completed:
+
+```bash
+[Path] search(handoff) → transcript(handoff) → summarize(complete)
+```
+
+This shows the full chain, making it easy to spot unexpected routing or missing steps.
+
+**2. State Inspection**
+
+Each handoff includes accumulated state. You can see what data flowed through the chain:
+
+```python
+# After search completes
+state = {"search_results": [...], "query": "pork loin"}
+
+# After transcript completes
+state = {"search_results": [...], "transcripts": [...], "query": "pork loin"}
+```
+
+**3. Loop Detection**
+
+The system catches infinite handoff cycles and fails fast with context:
+
+```python
+# Execution path: search → transcript → search (loop!)
+if current_agent in recent_path:
+    return PartialResult(error=f"Loop detected: {' → '.join(path)}")
+```
+
+### Common Issues and Solutions
+
+**Agent keeps routing to wrong agent?**
+- Check intent descriptions - make them more specific
+- Review the intent router's capability matching logic
+- Add explicit examples to agent instructions
+
+**Agent completes too early?**
+- Improve goal reasoning prompt - give it more examples
+- Check if the agent's instruction explicitly covers this case
+- Consider if the goal wording is ambiguous
+
+**Execution loops detected?**
+- Agent's reasoning is confused about when it's done
+- Add explicit examples to instructions showing when to complete vs handoff
+- Consider if two agents have overlapping capabilities
+
+### Debug Mode Example
+
+```bash
+# Verbose mode shows all agent decisions
+uv run youtube-agent-v2 -v chat -r "Find pork loin recipes and summarize"
+
+# Output shows reasoning at each step:
+[SearchAgent] Executing: "Find pork loin recipes"
+[SearchAgent] Goal reasoning: "User needs information FROM videos, not just titles"
+[SearchAgent] Decision: Handing off to get transcripts
+[SearchAgent] Handing off: "Get transcripts for these videos"
+
+[TranscriptAgent] Executing: "Get transcripts for these videos"
+[TranscriptAgent] Goal reasoning: "User wants summary, not satisfied with raw transcripts"
+[TranscriptAgent] Decision: Handing off to summarize
+[TranscriptAgent] Handing off: "Summarize cooking temps and times"
+
+[SummarizeAgent] Executing: "Summarize cooking temps and times"
+[SummarizeAgent] Goal reasoning: "Summary complete, goal satisfied"
+[SummarizeAgent] Decision: Completing with summary
+```
+
+The key is that each agent's reasoning is visible, making it clear why decisions were made.
+
+---
+
 ## Choosing Your Pattern
 
 We now have two patterns: the orchestrator from Part 1, and the autonomous pattern from this post. When should you use each?
 
-| Question | Pattern |
-|----------|---------|
-| Is it conversational with back-and-forth? | Orchestrator |
-| Is it goal-driven batch processing? | Autonomous |
-| Do you need to inspect the execution plan? | Consider a Planner + DAG approach |
-| Are there opportunities for parallelism? | Autonomous (built-in fan-out) |
+### Pattern Selection Guide
+
+| Scenario | Best Pattern | Why |
+|----------|--------------|-----|
+| ChatGPT-style conversational interface | **Orchestrator (V1)** | Back-and-forth dialogue, context accumulation needed |
+| Batch research pipeline | **Autonomous (V2)** | Goal-driven, adaptive, natural parallelism |
+| Ad-hoc "search and summarize" requests | **Orchestrator (V1)** | Simple, fast setup, well-understood |
+| Research requiring parallel searches | **Autonomous (V2)** | Built-in fan-out/fan-in pattern |
+| "I want agents to adapt as they learn more" | **Autonomous (V2)** | Goal-aware reasoning enables adaptation |
+| Simple, predictable workflows | **Orchestrator (V1)** | Single point of control, easier to debug |
+| Complex multi-step with opportunities for parallelism | **Autonomous (V2)** | Parallelism is first-class, not bolted on |
 
 ### Performance Characteristics
 
-| Metric | Orchestrator | Autonomous |
-|--------|--------------|------------|
+| Metric | Orchestrator (V1) | Autonomous (V2) |
+|--------|-------------------|-----------------|
 | **LLM calls per step** | 1 (orchestrator decides) | 2 (routing + reasoning) |
 | **Context growth** | Accumulates at center | Flows forward |
 | **Adaptability** | High (conversational) | High (goal-aware) |
-| **Parallelism** | Manual | Built-in |
+| **Parallelism** | Manual coordination | Built-in (event-driven) |
 | **Debugging** | Single point of control | Distributed execution path |
+| **Cost per step** | Lower (fewer calls) | Higher (routing + reasoning) |
+| **Context window usage** | Grows with chain length | Constant per step |
 
-The autonomous pattern has higher per-step LLM costs (routing + goal reasoning), but avoids the context accumulation problem of orchestrators. For long chains, this trade-off often favours autonomous.
+**Key trade-off**: The autonomous pattern has higher per-step LLM costs (routing + goal reasoning), but avoids the context accumulation problem of orchestrators. For long chains or workflows with parallelism opportunities, this trade-off often favours autonomous.
+
+> **Note**: For concrete performance data with real numbers, we recommend running both patterns with your specific workflows and measuring:
+> - Total LLM calls
+> - Latency (end-to-end time)
+> - Cost (based on your model pricing)
+> - Context token usage
+>
+> The relative performance will depend heavily on your specific use case.
 
 ---
 
@@ -636,4 +732,17 @@ The meta-pattern here isn't about agents specifically. It's about designing syst
 
 ---
 
-*The code for this project is available on GitHub. Both the V1 orchestrator and V2 autonomous patterns are implemented in the reference codebase.*
+## View the Code
+
+All patterns described in this series are implemented in the reference codebase:
+
+- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - Covered in Part 1
+- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_autonomous_agents)** - This post's focus
+- **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
+- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
+
+The code is meant to be read and learned from, not just used. Star the repo if you find it useful! ⭐
+
+---
+
+**What's Next**: In Part 3 (coming soon), we'll explore a third dimension: *when* to decide what happens. What if we could decide everything upfront with a single LLM call, then execute mechanically? The Planner + DAG pattern trades runtime adaptability for predictability and cost optimization.

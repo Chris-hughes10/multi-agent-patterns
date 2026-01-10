@@ -63,6 +63,40 @@ def search_and_summarize(query: str) -> str:
     return summary
 ```
 
+**After: Layered architecture**
+
+```python
+# Tool layer (agents/tools/) - LLM interface
+async def fetch_video_transcript(video_id: str) -> str:
+    """Fetch transcript - thin wrapper returning string for LLM."""
+    result = await youtube_service.fetch_transcript(video_id)
+    return format_transcript_for_llm(result)
+
+# Service layer (services/) - business logic
+class YouTubeService:
+    async def fetch_transcript(self, video_id: str) -> TranscriptResult:
+        """Fetch transcript - rich typed object returned."""
+        transcript = await YouTubeTranscriptApi.get(video_id)
+        metadata = await self._fetch_metadata(video_id)
+        return TranscriptResult(
+            transcript=transcript,
+            metadata=metadata,
+            video_id=video_id
+        )
+
+# Model layer (models/) - domain objects
+@dataclass
+class TranscriptResult:
+    transcript: list[dict[str, Any]]
+    metadata: VideoMetadata
+    video_id: str
+
+# Now each component is:
+# - Testable in isolation (mock the service, not external APIs)
+# - Reusable across agents
+# - Focused on a single concern
+```
+
 This works for a demo. But it's untestable without hitting real APIs, impossible to reuse components, and will become incomprehensible as we add features.
 
 The core insight that changed our architecture: **LLM-callable functions have fundamentally different concerns than business logic**. Separating them unlocks testability and reusability.
@@ -529,6 +563,18 @@ These principles apply regardless of which agent framework you choose:
 3. **Organise by bounded context** - Group code by the external system or domain concept, not by function. When you need to replace YouTube with Vimeo, one file changes.
 
 4. **Single responsibility for agents** - Each agent does one thing well. Coordination happens in a dedicated orchestrator (for now - we'll revisit this in Part 2).
+
+---
+
+## View the Code
+
+All patterns described here are implemented in the reference codebase:
+
+- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
+- **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
+- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
+
+The code is meant to be read and learned from, not just used. Star the repo if you find it useful! ⭐
 
 ---
 
