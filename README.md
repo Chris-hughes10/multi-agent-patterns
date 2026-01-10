@@ -133,6 +133,42 @@ uv run youtube-agent --debug chat "summarize a video about Python"
 
 Debug mode writes detailed logs to `data/logs/session_TIMESTAMP.log` for troubleshooting.
 
+## Troubleshooting
+
+### "Transcripts are disabled" or Connection Errors
+
+If you see errors like `TranscriptsDisabled` or connection timeouts when fetching transcripts:
+
+**Cause**: YouTube blocks requests from data center IP addresses (AWS, Azure, GCP, GitHub Codespaces, etc.)
+
+**Solution**:
+1. Set up a residential proxy service (e.g., Bright Data, Oxylabs, SmartProxy)
+2. Add to your `.env`:
+   ```bash
+   PROXY_URL=http://user:pass@your-residential-proxy:port
+   ```
+
+**Note**: Standard data center proxies won't work - you need residential IPs.
+
+### Azure OpenAI Authentication Issues
+
+If you see authentication errors:
+
+**Using Azure AD** (recommended):
+1. Run `az login` to authenticate
+2. Ensure `AZURE_TENANT_ID` is set in `.env`
+
+**Using API Key**:
+```bash
+AZURE_OPENAI_API_KEY=your-key-here
+```
+
+### Tests Failing
+
+- **Unit tests**: Should work without any credentials (external APIs are mocked)
+- **Integration tests**: Require valid Azure OpenAI credentials and network access
+- Run unit tests only: `uv run pytest` (integration tests are skipped by default)
+
 ## Architecture
 
 The system uses a **layered architecture** with clear separation of concerns:
@@ -284,8 +320,20 @@ See [docs/AUTONOMOUS_PATTERN.md](docs/AUTONOMOUS_PATTERN.md) for detailed archit
 
 ```bash
 uv sync --all-extras
-uv run pytest                    # Run unit tests
-uv run pytest -m integration     # Run integration tests (requires network)
+uv run pytest                    # Run unit tests (mocked external services)
+uv run pytest -m integration     # Run integration tests (requires Azure OpenAI + network)
 uv run ruff check src tests      # Lint code
 uv run mypy src                  # Type check
 ```
+
+### Integration Tests
+
+Integration tests require real Azure OpenAI credentials and network access. They're marked with `@pytest.mark.integration` and skipped by default.
+
+**To run integration tests:**
+
+1. Set up your `.env` file with valid Azure OpenAI credentials
+2. Ensure you have network access to YouTube and Azure OpenAI
+3. Run: `uv run pytest -m integration`
+
+**Note**: Integration tests may incur Azure OpenAI API costs and take longer to complete.
