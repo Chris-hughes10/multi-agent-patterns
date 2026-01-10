@@ -8,14 +8,8 @@ import logging
 
 import click
 
-from youtube_agent_planner.agents.planner import PlannerAgent
+from youtube_agent_planner.main import create_planner, create_registry
 from youtube_agent_planner.patterns.dag_executor import DAGExecutor
-from youtube_autonomous_agents.agents import (
-    SearchAgent,
-    SummarizeAgent,
-    TranscriptAgent,
-    WriterAgent,
-)
 from youtube_autonomous_agents.infra import AgentRegistry
 from youtube_autonomous_agents.infra.session import Session
 from youtube_autonomous_agents.models.handoff import PartialResult
@@ -28,39 +22,20 @@ logging.basicConfig(
 logger = logging.getLogger("youtube_agent_planner.cli")
 
 
-def create_registry() -> AgentRegistry:
-    """Create and populate an agent registry with all agents.
-
-    :return: Configured AgentRegistry
-    """
-    registry = AgentRegistry()
-
-    # Create and register all agents
-    registry.register(SearchAgent(registry))
-    registry.register(TranscriptAgent(registry))
-    registry.register(SummarizeAgent(registry))
-    registry.register(WriterAgent(registry))
-
-    logger.info(
-        "Registered %d agents: %s",
-        len(registry),
-        [a.name for a in registry.all_agents()],
-    )
-
-    return registry
-
-
 async def run_with_planning(
     request: str,
     registry: AgentRegistry,
 ) -> str | None:
-    """Run a request using the planner + DAG pattern.
+    """Run a request using the planner + DAG pattern with CLI output.
+
+    This is a CLI-specific wrapper that adds user-facing output.
+    For programmatic use, use youtube_agent_planner.main.process_request().
 
     :param request: User's natural language request
     :param registry: Agent registry with registered agents
     :return: Result string or None on failure
     """
-    planner = PlannerAgent(registry=registry)
+    planner = create_planner(registry)
     session = Session()
 
     # Create plan

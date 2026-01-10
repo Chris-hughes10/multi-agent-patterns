@@ -85,11 +85,19 @@ class WriterAgent(BaseAgent):
             # Build markdown content from accumulated state using LLM reasoning
             content = await self._build_markdown_content(goal, summaries, search_results, transcripts)
 
-            # Generate filename using LLM for meaningful names
-            filename_prefix = await self._generate_filename_prefix_llm(original_request, summaries)
+            # Check if user specified an explicit filename in the request
+            explicit_filename = self._extract_explicit_filename(original_request)
+            if not explicit_filename:
+                explicit_filename = self._extract_explicit_filename(goal)
 
-            # Write file with timestamp to avoid overwrites
-            filepath = await write_timestamped_markdown(content, prefix=filename_prefix)
+            if explicit_filename:
+                # Use the exact filename the user requested
+                filepath = await write_markdown_file(content, explicit_filename)
+            else:
+                # Generate filename using LLM for meaningful names
+                filename_prefix = await self._generate_filename_prefix_llm(original_request, summaries)
+                # Write file with timestamp to avoid overwrites
+                filepath = await write_timestamped_markdown(content, prefix=filename_prefix)
 
             return HandoffResult.complete({
                 "filepath": filepath,
@@ -159,6 +167,7 @@ Your task:
 4. Keep ONLY the actual useful content (facts, data, steps, techniques)
 5. Organize with clear headers and bullet points
 6. Keep the same information but remove the noise
+7. IMPORTANT: Include video IDs (like fI86yXKlnQA) in the content when referencing specific videos
 
 Output ONLY the clean markdown content, starting with a # header. Do not include any preamble or explanation."""
 
@@ -299,3 +308,36 @@ Filename:"""
         # Take first few words, sanitize for filesystem
         words = re.sub(r"[^a-zA-Z0-9\s]", "", goal).split()[:4]
         return "_".join(words).lower() or "research"
+
+    def _extract_explicit_filename(self, text: str) -> str | None:
+        """Extract an explicit filename from user request.
+
+        Looks for patterns like:
+        - "save to filename.md"
+        - "save the results to filename.md"
+        - "write to filename.md"
+        - "export to filename.md"
+
+        :param text: User request text
+        :return: Filename if found, None otherwise
+        """
+        if not text:
+            return None
+
+        # Pattern to match "save/write/export to <filename>.md"
+        patterns = [
+            r"(?:save|write|export)(?:\s+(?:the\s+)?(?:results?|output|content))?\s+(?:to|as)\s+([a-zA-Z0-9_\-]+\.md)",
+            r"(?:save|write|export)\s+(?:to|as)\s+([a-zA-Z0-9_\-]+\.md)",
+            r"filename[:\s]+([a-zA-Z0-9_\-]+\.md)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                filename = match.group(1)
+                # Remove .md extension if present (write_markdown_file adds it)
+                if filename.endswith(".md"):
+                    filename = filename[:-3]
+                return filename
+
+        return None

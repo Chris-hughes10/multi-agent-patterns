@@ -227,7 +227,7 @@ See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural
 
 ## V2: Autonomous Multi-Agent System
 
-YouTube Agent V2 (`youtube-agent-v2`) uses **autonomous agents with event-driven self-selection** - a unified coordination pattern where agents reason about goals and hand off work via a shared queue.
+YouTube Agent V2 (`youtube-autonomous`) uses **autonomous agents with event-driven self-selection** - a unified coordination pattern where agents reason about goals and hand off work via a shared queue.
 
 ### How It Works
 
@@ -237,15 +237,20 @@ YouTube Agent V2 (`youtube-agent-v2`) uses **autonomous agents with event-driven
 └────────────────────────┬────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────────────┐
+│                    Synthesizer                          │
+│         (analyzes request, detects parallelism)         │
+└────────────────────────┬────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
 │              Event-Driven Task Queue                    │
 └────────────────────────┬────────────────────────────────┘
                          │ (agents notified instantly)
-         ┌───────────────┼───────────────┐
-         ↓               ↓               ↓
-    ┌─────────┐     ┌─────────┐     ┌─────────┐
-    │ Search  │     │Transcr. │     │ Writer  │
-    └────┬────┘     └────┬────┘     └────┬────┘
-         └───────────────┴───────────────┘
+       ┌─────────────────┼─────────────────┐
+       ↓                 ↓                 ↓
+  ┌─────────┐      ┌───────────┐     ┌─────────┐
+  │ Search  │      │Transcript │     │Summarize│ ...
+  └────┬────┘      └─────┬─────┘     └────┬────┘
+       └─────────────────┴────────────────┘
                          ↓
               can_handle? → claim → execute
                          ↓
@@ -267,26 +272,26 @@ YouTube Agent V2 (`youtube-agent-v2`) uses **autonomous agents with event-driven
 
 ```bash
 # List registered agents
-uv run youtube-agent-v2 agents
+uv run youtube-autonomous agents
 
 # Simple commands
-uv run youtube-agent-v2 search "python async tutorial"
-uv run youtube-agent-v2 transcript VIDEO_ID
+uv run youtube-autonomous search "python async tutorial"
+uv run youtube-autonomous transcript VIDEO_ID
 
 # Interactive chat
-uv run youtube-agent-v2 chat
+uv run youtube-autonomous chat
 
 # Single request - agents chain automatically
-uv run youtube-agent-v2 chat -r "Find videos about cooking and summarize them"
+uv run youtube-autonomous chat -r "Find videos about cooking and summarize them"
 
 # Limit transcripts fetched (default: 5)
-uv run youtube-agent-v2 chat -t 3 -r "Find BBQ videos and summarize them"
+uv run youtube-autonomous chat -t 3 -r "Find BBQ videos and summarize them"
 ```
 
 ### Example Flow
 
 ```bash
-uv run youtube-agent-v2 chat -r "Find pork loin videos and summarize cooking temps"
+uv run youtube-autonomous chat -r "Find pork loin videos and summarize cooking temps"
 ```
 
 The agents chain automatically based on the goal:
@@ -310,7 +315,7 @@ The planner creates an execution DAG upfront with dependency tracking and parall
 |--------|-----------------|---------------|
 | **Control** | LLM decides every step | Agents self-coordinate via queue |
 | **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
-| **Command** | `youtube-agent` | `youtube-agent-v2` |
+| **Command** | `youtube-agent` | `youtube-autonomous` |
 
 See [docs/AUTONOMOUS_PATTERN.md](docs/AUTONOMOUS_PATTERN.md) for detailed architecture documentation.
 

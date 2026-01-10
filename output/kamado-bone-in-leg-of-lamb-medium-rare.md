@@ -1,98 +1,132 @@
-# Kamado Bone-In Leg of Lamb (3.2 kg) — Sliceable Medium-Rare
+# Kamado Bone-In Leg of Lamb (Sliceable Medium-Rare)
 
-## Overview
-This method is designed for a **bone-in leg of lamb** cooked on a **Kamado-style ceramic grill** (Big Green Egg / Kamado Joe / similar) with an **indirect smoke-roast** approach. It is based primarily on the **Eat More Vegans / Behind The Food TV** Big Green Egg leg-of-lamb technique (mustard as binder/antioxidant, scoring + herb/garlic studding, ~250°F indirect, periodic spritz, long rest) with a key finishing highlight from **Chuds BBQ** (pull earlier around 120°F, then optionally sear hot to finish while staying medium-rare and sliceable).
+**Date:** 2026-01-10  
+**Source synthesis (YouTube):**
+- Behind The Food TV — https://www.youtube.com/watch?v=61NMIbgaHls
+- Chuds BBQ — https://www.youtube.com/watch?v=D3UCkyvpL1Q
+- HowToBBQRight — https://www.youtube.com/watch?v=VM7hJHreMh0
+- Counterexample / caution: “leg like brisket” — https://www.youtube.com/watch?v=owunSDDTSI4
 
-## Targets
-- **Cooker temp (dome):** 250°F / 121°C (indirect)
-- **Pull temp (thickest part, off the bone):** 120°F / 49°C
-- **Final serving doneness:** 130–135°F / 54–57°C (medium-rare)
-- **Rest:** 30–60 min (prefer 60 min)
-- **Estimated cook time @ 250°F:** ~3.5–5.5 hours (shape + starting temp matter)
+> Goal: **traditional roast-style leg of lamb** that is **sliceable medium-rare** (not “pulled” or brisket-tender).
 
-## Ingredients / Tools
+---
 
-### Meat
-- 1 bone-in leg of lamb, ~3.2 kg
+## Commonalities across the sources (quick takeaways)
 
-### Seasoning & aromatics
-- Yellow mustard (thin coating)
-- Kosher salt
-- Black pepper
-- Garlic powder (or granulated garlic)
-- Garlic cloves, halved (for studding)
-- Fresh rosemary (short sprigs/pieces for studding)
-- Fresh ginger, sliced into slivers (optional)
+Across Behind The Food TV, Chuds BBQ, and HowToBBQRight, the shared approach is:
 
-### Spritz (optional)
-- 2/3 apple juice
-- 1/3 apple cider vinegar
+- **Cook indirect** (heat deflector / platesetter) like an oven roast, with gentle smoke.
+- **Moderate pit temps** in the **275–325°F (135–163°C)** range.
+- **Light smoke wood** (often fruit wood like **cherry**; sometimes oak) and **not too much**.
+- **Pull by internal temperature** for medium-rare (typically **125–135°F** depending on carryover/rest preference), then **rest well**.
+- Optional: **finish with a high-heat sear** for crust/color, either before or after the indirect cook.
 
-### Kamado setup
-- Lump charcoal (enough for 6+ hours)
-- 2–3 chunks fruit wood (plum if available; apple/cherry are close)
-- Heat deflectors / platesetter (for indirect cooking)
-- Drip pan (recommended on top of deflectors)
-- Instant-read thermometer + at least one leave-in probe
+And the “leg like brisket” style is a **different end goal** (cook to very high internal temps for shredding) and is **not** what you want for medium-rare slices.
 
-## Step-by-step
+---
 
-### 1) Pre-salt / prep (2–12 hours ahead recommended)
-1. **Trim lightly:** remove only thick/hard external fat and loose flaps; keep most fat.
-2. **Score the fat cap** in a shallow diamond pattern (do not cut deep into meat).
-3. **Mustard coat:** apply a thin layer all over, especially the fat side.
-4. **Season:** apply an even coat of SPG (salt/pepper/garlic). 
-   - Optional precision: salt at ~0.8–1.2% of meat weight (25–38 g salt for 3.2 kg).
-5. **Stud the scores:** make small stabs in/near the score marks and insert **garlic**, **rosemary**, and (optionally) **ginger**.
-6. Place on a rack over a tray and **refrigerate uncovered**.
+## Equipment & kamado setup (indirect roast)
 
-### 2) Fire & cooker setup
-1. Fill the charcoal basket with lump charcoal (ensure airflow is clear).
-2. Add **2–3 chunks fruit wood** mixed into the lump.
-3. Configure the grill for **indirect cooking** (deflectors/platesetter in).
-4. Place a **drip pan** on the deflectors.
-5. Stabilize at **250°F / 121°C dome**.
+### What you’ll use
+- Kamado grill (large preferred for clearance)
+- **Heat deflector/platesetter** (for indirect)
+- **Drip pan** (to catch fat/juices and reduce flare-ups)
+- Instant-read thermometer + optional leave-in probe
+- Lump charcoal
+- Smoking wood chunks (light application)
 
-### 3) Smoke-roast
-1. Put lamb on the grate **fat side up**.
-2. Insert a probe into the **thickest part**, staying **off the bone**.
-3. Cook at **250°F**.
+### Fire & airflow (kamado-specific)
+1. **Clean out ash** to ensure steady airflow.
+2. Build a **medium-size lump charcoal bed** (you don’t need a full “overnight brisket” load).
+3. Light in **one spot** (or two small spots) to avoid overshooting temp.
+4. Install the **heat deflector** for indirect cooking.
+5. Place a **drip pan** on/under the deflector. (Optional: add a little water to reduce scorching, but keep it simple.)
+6. Set the cooking grate.
+7. Stabilize the pit at **300°F** (target range **275–325°F**).
 
-### 4) Spritz (optional, as needed)
-- At ~60 minutes, spritz lightly with **2/3 apple juice + 1/3 apple cider vinegar**.
-- Repeat every 45–60 minutes **only if the surface looks dry** (Kamados retain moisture; avoid overspritzing).
+**Vent guidance (generic):**
+- Start with bottom vent open more than you’ll need, then choke down as you approach target.
+- Once near temp, make **small changes** and wait a few minutes between adjustments.
 
-### 5) Pull at 120°F (key to staying medium-rare)
-- Begin watching closely at ~115°F.
-- **Pull at 120°F / 49°C** in the thickest part.
+---
 
-### 6) Rest (preferred 60 minutes)
-- Wrap in foil (or tent) and rest **30–60 minutes**.
-- Preferred hold: **~60 minutes** in a cooler with a towel/blanket.
+## Wood choice (keep it light)
 
-### 7) Optional hot sear finish (for better crust)
-1. Open vents to raise the cooker to **350–450°F / 175–230°C**.
-2. If safe/easy, remove drip pan/deflectors for direct heat; otherwise sear with indirect setup at higher dome temp.
-3. Sear briefly **60–120 seconds per side**, just to brown the exterior.
+- Use **1–2 fist-sized chunks** of a mild wood.
+- Common fits mentioned across BBQ lamb cooks include **cherry** (mild, color) and **oak** (classic, a bit stronger).
+- Avoid over-smoking: lamb takes smoke readily.
 
-### 8) Slice and serve
-- Slice across the grain where possible (a leg has multiple muscles—rotate the roast as needed).
-- Expect ends to be more done than the center (normal for bone-in legs).
+---
 
-## Expected timeline (planning guide)
-- **Prep:** 15–25 min (plus optional 2–12 hr fridge rest)
-- **Warm-up & stabilize Kamado:** 30–60 min
-- **Cook @ 250°F:** ~3.5–5.5 hours (start checking earlier; internal temp is the truth)
-- **Rest:** 30–60 min
-- **Optional sear:** 5–10 min total including heat-up if already hot; longer if you need to ramp the cooker
+## Internal temperature targets (sliceable medium-rare)
 
-## Notes / Troubleshooting
-- **Probe placement:** keep the probe tip in the deepest muscle and away from the bone to avoid false high readings.
-- **If it’s cooking too slowly:** check airflow (ash buildup, clogged grate), open vents slightly, ensure charcoal is lit in multiple spots.
-- **If it’s cooking too fast:** reduce vents to stabilize; avoid frequent lid opening.
-- **If you accidentally reach 130°F before resting:** skip the sear and do a shorter rest.
-- **Smoke level:** fruit woods can be subtle; add one extra chunk if you prefer more smoke, but avoid over-smoking lamb.
+Because leg of lamb has multiple muscles, expect slight variation across the roast. Probe the **thickest center** without touching bone.
 
-## Source videos (YouTube)
-- Behind The Food TV / Eat More Vegans — “The Best Smoked Leg Of Lamb - Australian Lamb on the Big Green Egg” (video id: 61NMIbgaHls)
-- Chuds BBQ — “How I Made Smoked Leg of Lamb” (video context includes pulling around ~120°F and finishing hot) (video id: D3UCkyvpL1Q)
+- **Pull for medium-rare:** **125–130°F (52–54°C)**
+- **Finish after rest/carryover:** **130–135°F (54–57°C)**
+
+If you prefer slightly more done (still sliceable), pull closer to **130–135°F**.
+
+> **Do not** cook to “brisket/pulled” temps (e.g., 195–205°F). That’s the separate “leg like brisket” method (see caution below) and will not be medium-rare slices.
+
+---
+
+## Step-by-step method (kamado)
+
+### 1) Prep the lamb
+1. **Trim**: remove excess exterior fat and any hard fat, leaving a thin layer for flavor.
+2. **Season**: apply a simple rub (salt + pepper + garlic/rosemary profile is common) and let it sit while you bring the pit up. (Exact rub varies by source—use your preferred lamb-friendly blend.)
+3. If using a leave-in probe, plan your insertion point: **thickest part**, avoiding bone.
+
+### 2) Preheat & stabilize the kamado
+1. Set up **indirect** with **deflector + drip pan**.
+2. Stabilize at **~300°F** (acceptable **275–325°F**).
+3. Add **1–2 wood chunks** once the fire is established (early in the cook is typically when you’ll get the cleanest smoke).
+
+### 3) Start the indirect cook
+1. Place the lamb on the grate **over the drip pan**.
+2. Close the dome and cook **indirect at 275–325°F**.
+3. Watch **internal temperature**, not the clock.
+
+**Approximate timing range (very dependent on size and pit temp):**
+- Plan roughly **1.5–3.5 hours** for many bone-in legs (often ~5–8 lb) at 275–325°F.
+- Start checking sooner than you think once you pass **110°F internal**, because the last 15–20°F can go quickly.
+
+### 4) Pull at temp
+1. Pull the lamb when the thickest part hits **125–130°F** for medium-rare.
+2. If you intend to do a **post-cook sear**, you can pull a touch earlier (e.g., **122–128°F**) to account for sear + carryover.
+
+### 5) Rest (important for sliceability)
+1. Rest **15–30 minutes** (longer for larger legs), loosely tented.
+2. Expect carryover to bring it into the **130–135°F** zone.
+
+### 6) Optional finishing sear (for crust)
+Two common kamado-friendly options:
+
+**Option A: Sear after the indirect cook (reverse-sear style)**
+1. Remove lamb to rest briefly (even 5–10 minutes).
+2. Open vents and bring the kamado to **high heat** (or remove the deflector carefully if your setup allows) for direct grilling.
+3. Sear quickly, **1–3 minutes per side**, just to deepen color.
+4. Final rest 5–10 minutes, then slice.
+
+**Option B: Sear first, then finish indirect**
+1. Start direct/high heat to brown the exterior.
+2. Switch to indirect with deflector and finish to **125–130°F**.
+
+Pick the approach that best fits your kamado’s heat management and your comfort moving hot ceramics/deflectors.
+
+---
+
+## Slicing notes
+
+- Slice **across the grain**. A bone-in leg has different muscles/grain directions—rotate the roast as needed.
+- If parts are slightly more done near the exterior, slice those portions thinner.
+
+---
+
+## Caution: the “leg like brisket” counterexample
+
+One video approach treats leg of lamb **like brisket** (cook much longer to much higher internal temps for a shreddable texture):
+- https://www.youtube.com/watch?v=owunSDDTSI4
+
+That method can be delicious, but it’s a **different target outcome**. For **sliceable medium-rare**, stick to the moderate pit temp + pull at **125–130°F** and rest.
