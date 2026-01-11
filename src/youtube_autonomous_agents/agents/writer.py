@@ -4,10 +4,10 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
-
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
+
+    from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.tools.writer import write_markdown_file, write_timestamped_markdown
 from youtube_autonomous_agents.agents.base import BaseAgent
@@ -75,13 +75,17 @@ class WriterAgent(BaseAgent):
     with support for custom filenames and timestamps.
     """
 
-    def __init__(self, client: "AzureOpenAIChatClient | None" = None) -> None:
-        """Initialize with optional chat client.
+    def __init__(
+        self,
+        registry: "AgentRegistry",
+        client: "AzureOpenAIChatClient | None" = None,
+    ) -> None:
+        """Initialize with registry and optional chat client.
 
+        :param registry: Registry for agent discovery and task submission
         :param client: Optional chat client for dependency injection
         """
-        super().__init__()
-        self._client = client or get_chat_client()
+        super().__init__(registry, client)
 
     @property
     def name(self) -> str:
@@ -191,14 +195,29 @@ class WriterAgent(BaseAgent):
                     title_lookup[vid] = title
                     video_links.append(f"- [{title}](https://youtube.com/watch?v={vid}) by {channel}")
 
+        # Build video source list from transcripts (has actual video_ids)
+        video_sources = []
+        transcript_list = transcripts.get("transcripts", [])
+        for t in transcript_list:
+            vid = t.get("video_id")
+            title = t.get("title", title_lookup.get(vid, "Unknown"))
+            if vid:
+                video_sources.append(f"- {title} (video_id: {vid})")
+
         # Build input for LLM
         summary_texts = []
         for s in summaries:
-            video_id = s.get("video_id")
+            video_id = s.get("video_id", "unknown")
             title = s.get("title")
             if not title or title == "Unknown":
                 title = title_lookup.get(video_id, "Unknown Video")
-            summary_texts.append(f"### {title}\n{s.get('summary', 'No summary')}")
+            # Include video_id so LLM can reference it in output
+            summary_texts.append(f"### {title} (video_id: {video_id})\n{s.get('summary', 'No summary')}")
+
+        # Add video sources to summary texts if we have them
+        if video_sources:
+            video_sources_text = "\n\n## Video Sources (use these video_ids when referencing videos)\n" + "\n".join(video_sources)
+            summary_texts.append(video_sources_text)
 
         summaries_input = "\n\n".join(summary_texts) if summary_texts else "No summaries available."
 

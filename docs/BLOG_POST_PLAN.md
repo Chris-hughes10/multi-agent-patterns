@@ -50,7 +50,7 @@ A two-part series exploring the architecture and coordination patterns for produ
 
 **The layered architecture diagram**:
 ```
-application → agents → tools → services → models → infra
+cli → agents → tools → services → models → infra
 ```
 
 #### 3. Tools vs Services: The Key Distinction (600 words)

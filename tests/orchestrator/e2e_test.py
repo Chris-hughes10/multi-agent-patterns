@@ -10,7 +10,7 @@ import logging
 import re
 from pathlib import Path
 
-from youtube_agent_orchestrator.application.main import process_request
+from youtube_agent_orchestrator.cli.main import process_request
 
 # Enable logging at INFO level for key components
 logging.basicConfig(

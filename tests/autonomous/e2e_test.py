@@ -10,7 +10,7 @@ import logging
 import re
 from pathlib import Path
 
-from youtube_autonomous_agents.application.main import process_request
+from youtube_autonomous_agents.cli.main import process_request
 
 # Enable logging at INFO level for key components
 logging.basicConfig(

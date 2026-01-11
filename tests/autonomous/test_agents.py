@@ -75,14 +75,9 @@ def mock_goal_reasoning(satisfied: bool = True, next_step: str = ""):
     :param next_step: Next step if not satisfied
     """
     mock_client = create_mock_chat_client(satisfied, next_step)
+    # Patch where BaseAgent gets the chat client (all agents now use base class client)
     with patch(
-        "youtube_autonomous_agents.agents.search.get_chat_client",
-        return_value=mock_client,
-    ), patch(
-        "youtube_autonomous_agents.agents.transcript.get_chat_client",
-        return_value=mock_client,
-    ), patch(
-        "youtube_autonomous_agents.agents.summarize.get_chat_client",
+        "youtube_autonomous_agents.agents.base.get_chat_client",
         return_value=mock_client,
     ):
         yield mock_client
@@ -622,7 +617,7 @@ class TestWriterAgentAutonomous:
                 side_effect=capture_write,
             ),
             patch(
-                "youtube_autonomous_agents.agents.writer.get_chat_client",
+                "youtube_autonomous_agents.agents.base.get_chat_client",
                 return_value=mock_client,
             ),
         ):

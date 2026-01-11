@@ -293,5 +293,5 @@ See [V2_IMPLEMENTATION_PLAN.md](./V2_IMPLEMENTATION_PLAN.md) for full details.
 | Base Agent | `src/youtube_autonomous_agents/agents/base.py` |
 | Handoff Models | `src/youtube_autonomous_agents/models/handoff.py` |
 | Agents | `src/youtube_autonomous_agents/agents/` |
-| CLI Entry | `src/youtube_autonomous_agents/application/cli.py` |
-| Driver Functions | `src/youtube_autonomous_agents/application/main.py` |
+| CLI Entry | `src/youtube_autonomous_agents/cli/commands.py` |
+| Driver Functions | `src/youtube_autonomous_agents/cli/main.py` |

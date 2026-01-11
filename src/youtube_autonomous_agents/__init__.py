@@ -10,7 +10,7 @@ Architecture (DDD):
 - agents/: Domain layer (agent implementations + base class)
 - infra/: Infrastructure layer (registry, pool, queue, routing)
 - models/: Shared kernel (task, handoff data structures)
-- application/: Application layer (CLI, future API)
+- cli/: CLI layer (commands, driver functions)
 """
 
 from youtube_autonomous_agents.agents.base import BaseAgent

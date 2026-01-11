@@ -175,7 +175,7 @@ The system uses a **layered architecture** with clear separation of concerns:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     application/                        │
+│                         cli/                            │
 │                 Command-line interface                  │
 └─────────────────────────────────────────────────────────┘
                            │

@@ -5,10 +5,10 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
-
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
+
+    from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.youtube import search_youtube
 from youtube_agent_orchestrator.tools.search import search_youtube_structured
@@ -83,13 +83,17 @@ class SearchAgent(BaseAgent):
     returning structured data that can be used for variable resolution.
     """
 
-    def __init__(self, client: "AzureOpenAIChatClient | None" = None) -> None:
-        """Initialize with optional chat client.
+    def __init__(
+        self,
+        registry: "AgentRegistry",
+        client: "AzureOpenAIChatClient | None" = None,
+    ) -> None:
+        """Initialize with registry and optional chat client.
 
+        :param registry: Registry for agent discovery and task submission
         :param client: Optional chat client for dependency injection
         """
-        super().__init__()
-        self._client = client or get_chat_client()
+        super().__init__(registry, client)
 
     @property
     def name(self) -> str:

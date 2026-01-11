@@ -4,10 +4,10 @@ import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
-
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
+
+    from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.summarizer import TranscriptSummarizer
@@ -94,17 +94,18 @@ class SummarizeAgent(BaseAgent):
 
     def __init__(
         self,
+        registry: "AgentRegistry",
         summarizer: TranscriptSummarizer | None = None,
         client: "AzureOpenAIChatClient | None" = None,
     ) -> None:
-        """Initialize with optional dependencies.
+        """Initialize with registry and optional dependencies.
 
+        :param registry: Registry for agent discovery and task submission
         :param summarizer: Optional TranscriptSummarizer instance for dependency injection
         :param client: Optional chat client for dependency injection
         """
-        super().__init__()
+        super().__init__(registry, client)
         self._summarizer = summarizer or TranscriptSummarizer()
-        self._client = client or get_chat_client()
 
     @property
     def name(self) -> str:
