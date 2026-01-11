@@ -1,12 +1,12 @@
 # Architecting Multi-Agent Systems: Lessons from Building a YouTube Research Assistant
 
-The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, the Claude Agent SDK - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
+The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, Semantic Kernel - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
 
-I wanted to go beyond that. Not to build something enterprise-scale, but to build something **non-trivial yet clean** - proving that agent systems can be architected with the same discipline we apply to any serious software project.
+I wanted to go beyond that. Not to build something enterprise-scale, but to build something **non-trivial yet clean** - and to explore different architectural patterns, understand their complexity, and learn their trade-offs. My ambition was to start with the well-understood orchestrator pattern, then explore more advanced patterns such as planning-based approaches and autonomous agents that can self-assign and delegate to each other - demonstrating that agentic systems can be architected with the same discipline we apply to any serious software project.
 
-## The Problem That Started This
+## The Problem That Motivated This
 
-I'm a BBQ enthusiast, and YouTube is an incredible resource for learning. Channels like Chuds BBQ, Meat Church, and Mad Scientist BBQ have content that rivals any cookbook - but the knowledge is locked in video format. When I'm planning a cook, I find myself:
+I'm a cooking enthusiast, and one of my favourite areas is BBQ. Unlike other culinary domains where high-quality cookbooks abound, the best BBQ knowledge lives on YouTube. Channels like Chuds BBQ, Fork and Embers, and Mad Scientist BBQ have content that rivals any cookbook - but the knowledge is locked in video format. When I'm planning a cook, I find myself:
 
 1. Searching across multiple channels for a specific technique
 2. Watching (or skipping through) several videos
@@ -21,12 +21,14 @@ Most agent code I've seen mixes everything together - LLM calls, API integration
 
 ## In this article, we shall cover:
 
-- Why agent systems benefit from the same layered architecture as any complex application
+- Why agentic systems benefit from the same layered architecture as any complex application
 - The critical distinction between **tools** (LLM interface) and **services** (business logic) - the key insight that unlocks clean agent design
-- How Domain-Driven Design concepts map naturally to agent architectures
-- A practical example: four specialized agents with clear boundaries
+- How Domain-Driven Design concepts map naturally to agentic architectures
+- A practical example: an orchestrator coordinating four specialized agents
 
-The specific framework matters less than the principles. What follows applies whether you're using the Claude Agent SDK, LangChain, or building your own orchestration.
+For this project, I'm using the [Microsoft Agent Framework](https://github.com/microsoft/agents) - an open-source SDK for building AI agents in Python. It's the successor to both Semantic Kernel and AutoGen, combining AutoGen's simple abstractions for single- and multi-agent patterns with Semantic Kernel's enterprise features like thread-based state management and type safety. It also adds explicit workflow control for multi-agent execution paths.
+
+That said, the specific framework matters less than the principles. What follows applies whether you're using the Microsoft Agent Framework, LangChain, or building your own orchestration.
 
 Let's start with the problem.
 
@@ -34,70 +36,68 @@ Let's start with the problem.
 
 ## The Architecture Challenge
 
-Agent code gets messy fast. Here's what our first attempt looked like:
+Agent code gets messy fast. Here's the pattern I've seen repeatedly in tutorials and prototypes - agents, tools, prompts, and orchestration logic all tangled together:
 
 ```python
-# orchestrator.py - the "everything file"
+# orchestrator.py - agents, tools, prompts, and business logic all in one
 
-def search_and_summarize(query: str) -> str:
-    # Search YouTube
-    response = requests.get(f"https://youtube.com/results?q={query}")
-    videos = parse_html_for_videos(response.text)
+def run_research(query: str) -> str:
 
-    # Fetch transcripts
-    transcripts = []
-    for video in videos[:3]:
-        transcript = YouTubeTranscriptApi.get_transcript(video.id)
-        transcripts.append(transcript)
+    # Search agent with tool defined inline
+    def search_youtube(q: str) -> str:
+        response = requests.get(f"https://youtube.com/results?q={q}")
+        return parse_html_for_videos(response.text)
 
-    # Call LLM to summarize
-    client = AzureOpenAI(...)
-    summary = client.chat.completions.create(
-        messages=[{"role": "user", "content": f"Summarize: {transcripts}"}]
+    search_agent = ChatAgent(
+        name="SearchAgent",
+        instructions="""You search YouTube. Use search_youtube to find videos.
+        Return video IDs and titles as JSON.""",
+        tools=[search_youtube]
     )
 
-    # Save to file
-    with open("output.md", "w") as f:
-        f.write(summary)
+    # Transcript agent with its own inline tool
+    def get_transcript(video_id: str) -> str:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        return " ".join([t["text"] for t in transcript])
 
+    transcript_agent = ChatAgent(
+        name="TranscriptAgent",
+        instructions="Fetch transcripts using get_transcript tool.",
+        tools=[get_transcript]
+    )
+
+    # Summarize agent with prompt engineering embedded
+    summarize_agent = ChatAgent(
+        name="SummarizeAgent",
+        instructions=f"""Summarize cooking content. Focus on:
+        - Temperatures and timing
+        - Key techniques
+        - Pro tips
+        Format as markdown."""
+    )
+
+    # Orchestration logic interleaved with agent calls
+    client = AzureOpenAI(api_key=os.environ["KEY"], ...)
+
+    videos = search_agent.run(query, client=client)
+    transcripts = []
+    for vid in parse_json(videos)[:3]:
+        text = transcript_agent.run(f"Get transcript for {vid['id']}", client=client)
+        transcripts.append(text)
+
+    summary = summarize_agent.run(f"Summarize:\n{transcripts}", client=client)
+
+    Path(f"./outputs/{query}.md").write_text(summary)
     return summary
 ```
 
-**After: Layered architecture**
+This works for a demo. But it has serious problems:
 
-```python
-# Tool layer (agents/tools/) - LLM interface
-async def fetch_video_transcript(video_id: str) -> str:
-    """Fetch transcript - thin wrapper returning string for LLM."""
-    result = await youtube_service.fetch_transcript(video_id)
-    return format_transcript_for_llm(result)
-
-# Service layer (services/) - business logic
-class YouTubeService:
-    async def fetch_transcript(self, video_id: str) -> TranscriptResult:
-        """Fetch transcript - rich typed object returned."""
-        transcript = await YouTubeTranscriptApi.get(video_id)
-        metadata = await self._fetch_metadata(video_id)
-        return TranscriptResult(
-            transcript=transcript,
-            metadata=metadata,
-            video_id=video_id
-        )
-
-# Model layer (models/) - domain objects
-@dataclass
-class TranscriptResult:
-    transcript: list[dict[str, Any]]
-    metadata: VideoMetadata
-    video_id: str
-
-# Now each component is:
-# - Testable in isolation (mock the service, not external APIs)
-# - Reusable across agents
-# - Focused on a single concern
-```
-
-This works for a demo. But it's untestable without hitting real APIs, impossible to reuse components, and will become incomprehensible as we add features.
+- **Untestable** - Can't test agents without hitting real APIs
+- **Not reusable** - Tools are trapped inside this function
+- **Hard to extend** - Adding a new agent means modifying this monolith
+- **Impossible to modify in isolation** - Changing one agent risks breaking others
+- **Prompts scattered everywhere** - No single place to tune agent behaviour
 
 The core insight that changed our architecture: **LLM-callable functions have fundamentally different concerns than business logic**. Separating them unlocks testability and reusability.
 
@@ -107,7 +107,7 @@ We settled on six layers, each with a single, well-defined responsibility. If yo
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   application/                          │
+│                   presentation/                         │
 │              User-facing command interface              │
 │                                                         │
 │                   [Presentation Layer]                  │
@@ -158,11 +158,47 @@ We settled on six layers, each with a single, well-defined responsibility. If yo
 └─────────────────────────────────────────────────────────┘
 ```
 
+Here's what this looks like in practice:
+
+```python
+# agents/search.py - Agent layer (configuration only)
+def create_search_agent() -> ChatAgent:
+    """Factory function that creates a Search Agent."""
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
+
+# tools/search.py - Tool layer (thin LLM adapter)
+async def search_youtube(query: str) -> str:
+    """Search YouTube for videos matching the query."""
+    results = await youtube_service.search(query)  # Calls service
+    return format_for_llm(results)                 # Formats for LLM
+
+# services/youtube.py - Service layer (business logic)
+class YouTubeService:
+    async def search(self, query: str) -> list[VideoResult]:
+        """Search YouTube - returns rich domain objects."""
+        response = await self._client.search(query)
+        return [VideoResult.from_response(v) for v in response]
+
+# models/search.py - Model layer (domain objects)
+@dataclass
+class VideoResult:
+    video_id: str
+    title: str
+    channel: str
+```
+
+Each layer has a single responsibility: agents configure behaviour, tools adapt for LLMs, services implement logic, models define structure. Testing is straightforward - mock at the layer boundary, not deep inside.
+
 The DDD mapping isn't forced - it emerges naturally because agent systems have the same concerns as any complex application:
 
 | Layer | DDD Concept | Agent System Role |
 |-------|-------------|-------------------|
-| `application/` | Presentation | User interaction, output formatting |
+| `presentation/` | Presentation | User interaction, output formatting |
 | `agents/` | Application | Orchestrates workflows, coordinates domain operations |
 | `tools/` | Anti-Corruption Layer | Translates between LLM interface and domain language |
 | `services/` | Domain | Core business logic, domain rules, the "what" |
@@ -426,22 +462,23 @@ This separation means we can test each specialist agent independently, with clea
 An agent definition is surprisingly simple. Here's the SearchAgent:
 
 ```python
-class SearchAgent:
-    """Agent specialized for YouTube video search."""
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent.
+Your job is to find relevant YouTube videos based on user queries.
+Use the search_youtube tool to find videos.
+You ONLY search - you do not fetch transcripts or summarize."""
 
-    def get_agent(self) -> ChatAgent:
-        return ChatAgent(
-            name="SearchAgent",
-            instructions="""You are a YouTube Search Agent.
-            Your job is to find relevant YouTube videos based on user queries.
-            Use the search_youtube tool to find videos.
-            You ONLY search - you do not fetch transcripts or summarize.""",
-            tools=[search_youtube_formatted],  # Tool from tools/ layer
-        )
+def create_search_agent() -> ChatAgent:
+    """Factory function that creates a Search Agent."""
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
 ```
 
 Notice the pattern:
-- **Instructions** define the agent's persona and boundaries
+- **Instructions** are extracted as module-level constants for clarity
 - **Tools** are functions from the `tools/` layer (which call services)
 - The agent doesn't know about YouTube APIs - it just calls tools
 
@@ -453,12 +490,39 @@ The orchestrator follows the same pattern, but its tools delegate to other agent
 class OrchestratorAgent:
     """Coordinates sub-agents for YouTube research tasks."""
 
+    def __init__(self) -> None:
+        self._agents: dict[str, ChatAgent] = {}
+        # Agent factory registry for lazy initialization
+        self._agent_factories = {
+            "search": create_search_agent,
+            "transcript": create_transcript_agent,
+            "summarize": create_summarize_agent,
+            "writer": create_writer_agent,
+        }
+
+    def _get_agent(self, name: str) -> ChatAgent:
+        """Get or create an agent by name (lazy initialization)."""
+        if name not in self._agents:
+            self._agents[name] = self._agent_factories[name]()
+        return self._agents[name]
+
+    async def _delegate(self, agent_name: str, request: str) -> str:
+        """Delegate a request to a sub-agent."""
+        agent = self._get_agent(agent_name)
+        result = await agent.run(request)
+        return result.text
+
+    async def ask_search_agent(self, request: str) -> str:
+        """Delegate a search request to the Search Agent."""
+        return await self._delegate("search", request)
+
+    # ... similar for transcript, summarize, writer
+
     def get_orchestrator(self) -> ChatAgent:
         return ChatAgent(
+            chat_client=get_chat_client(),
             name="Orchestrator",
-            instructions="""You coordinate YouTube research tasks.
-            You have access to specialist agents - delegate to them.
-            Never try to search YouTube or fetch transcripts yourself.""",
+            instructions=ORCHESTRATOR_INSTRUCTIONS,
             tools=[
                 self.ask_search_agent,
                 self.ask_transcript_agent,
@@ -466,20 +530,6 @@ class OrchestratorAgent:
                 self.ask_writer_agent,
             ],
         )
-
-    async def ask_search_agent(self, request: str) -> str:
-        """Delegate a search request to the Search Agent."""
-        agent = SearchAgent().get_agent()
-        result = await agent.run(request)
-        return result.text
-
-    async def ask_transcript_agent(self, request: str) -> str:
-        """Delegate a transcript request to the Transcript Agent."""
-        agent = TranscriptAgent().get_agent()
-        result = await agent.run(request)
-        return result.text
-
-    # ... similar for summarize and writer
 ```
 
 The orchestrator's "tools" are delegation functions. When the LLM decides to search, it calls `ask_search_agent`, which runs the SearchAgent and returns its result. The orchestrator sees the result and decides what to do next.
@@ -556,7 +606,7 @@ This gives higher confidence (real code paths), less brittle tests (fewer mocks 
 
 These principles apply regardless of which agent framework you choose:
 
-1. **Layer your architecture** - Presentation, Application, Domain, Infrastructure. Agent systems have the same concerns as any complex application.
+1. **Layer your architecture** - CLI, Agents, Services, Infrastructure. Agent systems have the same concerns as any complex application.
 
 2. **Separate tools from services** - Tools are the Anti-Corruption Layer between LLMs and your domain. Keep them thin. Let services do the real work.
 

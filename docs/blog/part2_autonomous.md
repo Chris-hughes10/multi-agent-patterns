@@ -54,6 +54,8 @@ But the pattern has characteristics worth noting:
 - **Sequential by default**: Parallelism requires explicit orchestrator logic
 - **Central coupling**: Adding new agents means updating the orchestrator
 
+TODO context bloat?
+
 I explored several alternative patterns:
 - **Dispatcher pattern**: A router that assigns tasks but doesn't coordinate results
 - **Capability-based routing**: Match tasks to agents by declared capabilities
@@ -79,8 +81,8 @@ The codebase structure changes to support this pattern:
 
 ```
 src/youtube_autonomous_agents/
-├── application/          # Entry points (same as before)
-│   ├── cli.py
+├── cli/                  # Entry points (same as before)
+│   ├── commands.py
 │   └── main.py
 ├── agents/               # Now with goal-aware execution
 │   ├── base.py           # BaseAgent with execute_autonomous()
@@ -112,13 +114,15 @@ In Part 1, we saw agents defined with instructions and tools:
 
 ```python
 # Orchestrator pattern: agent executes tools, returns to coordinator
-class SearchAgent:
-    def get_agent(self) -> ChatAgent:
-        return ChatAgent(
-            name="SearchAgent",
-            instructions="You are a YouTube Search Agent...",
-            tools=[search_youtube_formatted],
-        )
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent..."""
+
+def create_search_agent() -> ChatAgent:
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
 ```
 
 In the autonomous pattern, agents gain goal-awareness:
@@ -161,12 +165,17 @@ This is philosophically different from most agent frameworks. The agent isn't ju
 Let's be explicit about what this costs. Here's the complete V1 SearchAgent:
 
 ```python
-# V1 SearchAgent - 30 lines total (entire file)
-SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent..."""
+# V1 SearchAgent - ~30 lines total (entire file)
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent.
+Your job is to find relevant YouTube videos based on user queries.
+...
+You only search - you do not fetch transcripts or summarize."""
 
 def create_search_agent() -> ChatAgent:
+    """Create a Search Agent instance."""
+    client = get_chat_client()
     return ChatAgent(
-        chat_client=get_chat_client(),
+        chat_client=client,
         name="SearchAgent",
         instructions=SEARCH_AGENT_INSTRUCTIONS,
         tools=[search_youtube_formatted],
