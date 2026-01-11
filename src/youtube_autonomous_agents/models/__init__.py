@@ -8,6 +8,7 @@ from youtube_autonomous_agents.models.handoff import (
     HandoffResult,
     OperationTimeout,
     PartialResult,
+    RequestAnalysis,
 )
 from youtube_autonomous_agents.models.task import (
     MaxDepthExceededError,
@@ -27,4 +28,5 @@ __all__ = [
     "AgentReasoning",
     "PartialResult",
     "OperationTimeout",
+    "RequestAnalysis",
 ]

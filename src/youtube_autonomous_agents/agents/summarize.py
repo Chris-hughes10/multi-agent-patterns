@@ -27,6 +27,58 @@ Your summaries should:
 You ONLY summarize - you do not fetch transcripts or search for videos. Other agents handle those tasks."""
 
 
+SYNTHESIS_PROMPT = """You are an expert at synthesizing information from multiple video transcripts.
+
+USER'S GOAL: "{goal}"
+
+Your task:
+1. Review ALL transcripts below and identify which videos are RELEVANT to the user's goal
+2. EXCLUDE any videos that don't match (e.g., if user asks for pork loin, exclude pulled pork/pork butt recipes)
+3. SYNTHESIZE the relevant information into ONE coherent answer
+4. If there are multiple approaches/recipes, summarize the COMMON elements and note key differences
+5. Focus on the specific information requested (temps, times, techniques, etc.)
+
+Format your response as:
+## Relevant Videos
+- List which videos were relevant and which were excluded (and why)
+
+## Key Information
+- Synthesized answer addressing the user's goal
+- Use bullet points for specific data (temps, times, etc.)
+- Note if different videos suggest different approaches
+
+## Recommended Approach
+- If multiple methods exist, suggest which might work best (or note that it depends on user preference)
+
+Keep your response focused and under 800 words. Do NOT just list each video separately - SYNTHESIZE the information."""
+
+
+GOAL_REASONING_PROMPT = """You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Created {summary_count} synthesized summary from YouTube video transcripts.
+{preview}
+
+QUESTION: Is the user's goal satisfied with this summary, or do they need the content saved to a file?
+
+Consider:
+- If they wanted information, analysis, or answers → goal is SATISFIED (I provided a summary)
+- If they explicitly asked to save, export, write to file, or create a document → need to WRITE TO FILE
+
+IMPORTANT: Summaries are usually the FINAL step. Only say "not satisfied" if the user explicitly asked for file output.
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if no) write to file
+
+Examples:
+Goal: "summarize this video" → SATISFIED: yes
+Goal: "save notes to research.md" → SATISFIED: no, NEXT_STEP: write to file
+Goal: "find videos and summarize" → SATISFIED: yes
+Goal: "get info and export to markdown" → SATISFIED: no, NEXT_STEP: write to file"""
+
+
 class SummarizeAgent(BaseAgent):
     """Agent specialized for content summarization.
 
@@ -201,36 +253,10 @@ class SummarizeAgent(BaseAgent):
 
             all_transcripts = "\n\n".join(combined_content)
 
-            # Build a synthesis prompt that filters and combines relevant info
-            synthesis_prompt = f"""You are an expert at synthesizing information from multiple video transcripts.
-
-USER'S GOAL: "{goal}"
-
-Your task:
-1. Review ALL transcripts below and identify which videos are RELEVANT to the user's goal
-2. EXCLUDE any videos that don't match (e.g., if user asks for pork loin, exclude pulled pork/pork butt recipes)
-3. SYNTHESIZE the relevant information into ONE coherent answer
-4. If there are multiple approaches/recipes, summarize the COMMON elements and note key differences
-5. Focus on the specific information requested (temps, times, techniques, etc.)
-
-Format your response as:
-## Relevant Videos
-- List which videos were relevant and which were excluded (and why)
-
-## Key Information
-- Synthesized answer addressing the user's goal
-- Use bullet points for specific data (temps, times, etc.)
-- Note if different videos suggest different approaches
-
-## Recommended Approach
-- If multiple methods exist, suggest which might work best (or note that it depends on user preference)
-
-Keep your response focused and under 800 words. Do NOT just list each video separately - SYNTHESIZE the information."""
-
             synthesized = await summarizer.summarize(
                 transcript_text=all_transcripts,
                 video_title="Multiple Videos",
-                system_prompt=synthesis_prompt,
+                system_prompt=SYNTHESIS_PROMPT.format(goal=goal),
             )
 
             # Return as single synthesized summary
@@ -279,30 +305,11 @@ Keep your response focused and under 800 words. Do NOT just list each video sepa
             text = first.get("summary", "")[:200]
             preview = f"Preview: {text}..."
 
-        prompt = f"""You are helping decide if a user's goal is satisfied.
-
-USER'S GOAL: "{goal}"
-
-WHAT I DID: Created {summary_count} synthesized summary from YouTube video transcripts.
-{preview}
-
-QUESTION: Is the user's goal satisfied with this summary, or do they need the content saved to a file?
-
-Consider:
-- If they wanted information, analysis, or answers → goal is SATISFIED (I provided a summary)
-- If they explicitly asked to save, export, write to file, or create a document → need to WRITE TO FILE
-
-IMPORTANT: Summaries are usually the FINAL step. Only say "not satisfied" if the user explicitly asked for file output.
-
-Respond in this exact format:
-SATISFIED: yes or no
-NEXT_STEP: (only if no) write to file
-
-Examples:
-Goal: "summarize this video" → SATISFIED: yes
-Goal: "save notes to research.md" → SATISFIED: no, NEXT_STEP: write to file
-Goal: "find videos and summarize" → SATISFIED: yes
-Goal: "get info and export to markdown" → SATISFIED: no, NEXT_STEP: write to file"""
+        prompt = GOAL_REASONING_PROMPT.format(
+            goal=goal,
+            summary_count=summary_count,
+            preview=preview,
+        )
 
         try:
             client = get_chat_client()

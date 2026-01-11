@@ -252,3 +252,36 @@ class OperationTimeout:
         if self.suggested_fallback:
             msg += f". Suggested: {self.suggested_fallback}"
         return msg
+
+
+@dataclass
+class RequestAnalysis:
+    """Result of analyzing a user request for parallelism.
+
+    Used by the Synthesizer to determine whether a request contains
+    independent tasks that can be executed in parallel.
+
+    :param has_parallelism: Whether the request contains parallel tasks
+    :param parallel_intents: List of parallel task descriptions (if parallel)
+    :param join_intent: What to do after parallel tasks (if parallel)
+    :param first_intent: The first/only task to do (if sequential)
+    """
+
+    has_parallelism: bool
+    parallel_intents: list[str] = field(default_factory=list)
+    join_intent: str | None = None
+    first_intent: str | None = None
+
+    @classmethod
+    def sequential(cls, intent: str) -> "RequestAnalysis":
+        """Create analysis for a sequential (non-parallel) request."""
+        return cls(has_parallelism=False, first_intent=intent)
+
+    @classmethod
+    def parallel(cls, intents: list[str], join_intent: str) -> "RequestAnalysis":
+        """Create analysis for a parallel request."""
+        return cls(
+            has_parallelism=True,
+            parallel_intents=intents,
+            join_intent=join_intent,
+        )

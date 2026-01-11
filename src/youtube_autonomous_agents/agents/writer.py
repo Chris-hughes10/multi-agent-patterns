@@ -24,6 +24,44 @@ Best practices:
 You ONLY write files - you do not fetch transcripts, search, or summarize. Other agents handle those tasks."""
 
 
+CONTENT_BUILDING_PROMPT = """You are creating a clean, well-formatted markdown document.
+
+USER'S GOAL: "{goal}"
+
+RAW CONTENT FROM PREVIOUS AGENTS:
+{summaries_input}
+
+Your task:
+1. Create a clean markdown document that addresses the user's goal
+2. REMOVE any meta-commentary like "Saved to file", "Content ready to save", "File output", etc.
+3. REMOVE any internal agent messages or instructions
+4. Keep ONLY the actual useful content (facts, data, steps, techniques)
+5. Organize with clear headers and bullet points
+6. Keep the same information but remove the noise
+7. IMPORTANT: Include video IDs (like fI86yXKlnQA) in the content when referencing specific videos
+
+Output ONLY the clean markdown content, starting with a # header. Do not include any preamble or explanation."""
+
+
+FILENAME_GENERATION_PROMPT = """Generate a short, descriptive filename for a markdown research document.
+
+User's request: "{goal}"{topics_hint}
+
+Rules:
+- Return ONLY the filename prefix (no extension, no path)
+- Use 2-4 words separated by underscores
+- Be specific about the topic (e.g., "pork_loin_kamado_cooking" not "cooking_research")
+- Use lowercase letters and underscores only
+- No quotes or special characters
+
+Example outputs:
+- pork_loin_kamado_tips
+- python_async_tutorial
+- bbq_brisket_techniques
+
+Filename:"""
+
+
 class WriterAgent(BaseAgent):
     """Agent specialized for file export operations.
 
@@ -152,24 +190,10 @@ class WriterAgent(BaseAgent):
 
         summaries_input = "\n\n".join(summary_texts) if summary_texts else "No summaries available."
 
-        # Use LLM to synthesize clean markdown
-        prompt = f"""You are creating a clean, well-formatted markdown document.
-
-USER'S GOAL: "{goal}"
-
-RAW CONTENT FROM PREVIOUS AGENTS:
-{summaries_input}
-
-Your task:
-1. Create a clean markdown document that addresses the user's goal
-2. REMOVE any meta-commentary like "Saved to file", "Content ready to save", "File output", etc.
-3. REMOVE any internal agent messages or instructions
-4. Keep ONLY the actual useful content (facts, data, steps, techniques)
-5. Organize with clear headers and bullet points
-6. Keep the same information but remove the noise
-7. IMPORTANT: Include video IDs (like fI86yXKlnQA) in the content when referencing specific videos
-
-Output ONLY the clean markdown content, starting with a # header. Do not include any preamble or explanation."""
+        prompt = CONTENT_BUILDING_PROMPT.format(
+            goal=goal,
+            summaries_input=summaries_input,
+        )
 
         try:
             client = get_chat_client()
@@ -261,23 +285,10 @@ Output ONLY the clean markdown content, starting with a # header. Do not include
 
         topics_hint = f"\nVideo topics: {', '.join(topics)}" if topics else ""
 
-        prompt = f"""Generate a short, descriptive filename for a markdown research document.
-
-User's request: "{goal}"{topics_hint}
-
-Rules:
-- Return ONLY the filename prefix (no extension, no path)
-- Use 2-4 words separated by underscores
-- Be specific about the topic (e.g., "pork_loin_kamado_cooking" not "cooking_research")
-- Use lowercase letters and underscores only
-- No quotes or special characters
-
-Example outputs:
-- pork_loin_kamado_tips
-- python_async_tutorial
-- bbq_brisket_techniques
-
-Filename:"""
+        prompt = FILENAME_GENERATION_PROMPT.format(
+            goal=goal,
+            topics_hint=topics_hint,
+        )
 
         try:
             client = get_chat_client()

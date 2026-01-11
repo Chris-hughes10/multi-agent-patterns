@@ -11,7 +11,6 @@ just like any agent would for fan-out operations.
 """
 
 import json
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agent_framework import ChatAgent
@@ -19,40 +18,14 @@ from agent_framework.azure import AzureOpenAIChatClient
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
 from youtube_autonomous_agents.infra.pool import SelfSelectingPool
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
+from youtube_autonomous_agents.models.handoff import (
+    HandoffResult,
+    PartialResult,
+    RequestAnalysis,
+)
 
 if TYPE_CHECKING:
     from youtube_autonomous_agents.infra.registry import AgentRegistry
-
-
-@dataclass
-class RequestAnalysis:
-    """Result of analyzing a user request for parallelism.
-
-    :param has_parallelism: Whether the request contains parallel tasks
-    :param parallel_intents: List of parallel task descriptions (if parallel)
-    :param join_intent: What to do after parallel tasks (if parallel)
-    :param first_intent: The first/only task to do (if sequential)
-    """
-
-    has_parallelism: bool
-    parallel_intents: list[str] = field(default_factory=list)
-    join_intent: str | None = None
-    first_intent: str | None = None
-
-    @classmethod
-    def sequential(cls, intent: str) -> "RequestAnalysis":
-        """Create analysis for a sequential (non-parallel) request."""
-        return cls(has_parallelism=False, first_intent=intent)
-
-    @classmethod
-    def parallel(cls, intents: list[str], join_intent: str) -> "RequestAnalysis":
-        """Create analysis for a parallel request."""
-        return cls(
-            has_parallelism=True,
-            parallel_intents=intents,
-            join_intent=join_intent,
-        )
 
 
 SYNTHESIZER_INSTRUCTIONS = """You are a Synthesizer Agent - the user's primary assistant for YouTube video research.
@@ -72,6 +45,51 @@ When presenting results:
 - Suggest follow-up actions the user might want to take
 
 If something went wrong during processing, explain what happened and suggest alternatives."""
+
+
+PARALLELISM_ANALYSIS_PROMPT = """Analyze this user request to determine if it contains PARALLEL tasks.
+
+AVAILABLE AGENTS:
+{agent_descriptions}
+
+USER REQUEST: "{user_request}"
+
+INSTRUCTIONS:
+1. Identify if the request asks for MULTIPLE INDEPENDENT tasks of the SAME TYPE
+   - Example: "Search channel A AND channel B" = 2 parallel searches
+   - Example: "Get transcripts for video X and video Y" = 2 parallel transcript fetches
+2. Tasks are parallel if they:
+   - Can run independently (don't depend on each other's results)
+   - Are the same type of operation (both searches, both transcripts, etc.)
+3. Sequential tasks are NOT parallel:
+   - "Search, then get transcripts, then summarize" = sequential (each depends on previous)
+
+Respond with JSON only:
+{{
+    "has_parallelism": true/false,
+    "parallel_intents": ["task 1 description", "task 2 description"] or null,
+    "join_intent": "what to do after parallel tasks complete" or null,
+    "reasoning": "brief explanation"
+}}"""
+
+
+ERROR_RESPONSE_PROMPT = """The user asked: "{user_request}"
+
+Unfortunately, there was an issue during processing:
+Error: {error}
+
+Partial data collected: {partial_data}
+
+Please explain what happened to the user in a helpful way and suggest alternatives."""
+
+
+SUCCESS_RESPONSE_PROMPT = """The user asked: "{user_request}"
+
+Here are the results from the specialized agents:
+{result}
+
+Please present these results to the user in a clear, helpful format.
+Summarize key findings and suggest any relevant follow-up actions."""
 
 
 class SynthesizerAgent:
@@ -219,37 +237,17 @@ class SynthesizerAgent:
         :return: RequestAnalysis with parallelism info
         """
         # Build agent descriptions for the prompt
-        agent_descriptions = []
+        agent_desc_list = []
         for agent in self._registry.all_agents():
             if hasattr(agent, "description"):
-                agent_descriptions.append(f"- {agent.name}: {agent.description}")
+                agent_desc_list.append(f"- {agent.name}: {agent.description}")
             else:
-                agent_descriptions.append(f"- {agent.name}: {', '.join(agent.capabilities)}")
+                agent_desc_list.append(f"- {agent.name}: {', '.join(agent.capabilities)}")
 
-        prompt = f"""Analyze this user request to determine if it contains PARALLEL tasks.
-
-AVAILABLE AGENTS:
-{chr(10).join(agent_descriptions)}
-
-USER REQUEST: "{user_request}"
-
-INSTRUCTIONS:
-1. Identify if the request asks for MULTIPLE INDEPENDENT tasks of the SAME TYPE
-   - Example: "Search channel A AND channel B" = 2 parallel searches
-   - Example: "Get transcripts for video X and video Y" = 2 parallel transcript fetches
-2. Tasks are parallel if they:
-   - Can run independently (don't depend on each other's results)
-   - Are the same type of operation (both searches, both transcripts, etc.)
-3. Sequential tasks are NOT parallel:
-   - "Search, then get transcripts, then summarize" = sequential (each depends on previous)
-
-Respond with JSON only:
-{{
-    "has_parallelism": true/false,
-    "parallel_intents": ["task 1 description", "task 2 description"] or null,
-    "join_intent": "what to do after parallel tasks complete" or null,
-    "reasoning": "brief explanation"
-}}"""
+        prompt = PARALLELISM_ANALYSIS_PROMPT.format(
+            agent_descriptions="\n".join(agent_desc_list),
+            user_request=user_request,
+        )
 
         try:
             response = await self._client.get_response(prompt)
@@ -287,23 +285,16 @@ Respond with JSON only:
         :return: User-friendly response string
         """
         if isinstance(result, PartialResult):
-            prompt = f"""The user asked: "{user_request}"
-
-Unfortunately, there was an issue during processing:
-Error: {result.error}
-
-Partial data collected: {result.partial_data}
-
-Please explain what happened to the user in a helpful way and suggest alternatives."""
-
+            prompt = ERROR_RESPONSE_PROMPT.format(
+                user_request=user_request,
+                error=result.error,
+                partial_data=result.partial_data,
+            )
         else:
-            prompt = f"""The user asked: "{user_request}"
-
-Here are the results from the specialized agents:
-{result.result}
-
-Please present these results to the user in a clear, helpful format.
-Summarize key findings and suggest any relevant follow-up actions."""
+            prompt = SUCCESS_RESPONSE_PROMPT.format(
+                user_request=user_request,
+                result=result.result,
+            )
 
         # Use client directly for simple response synthesis (no tools needed)
         response = await self._client.get_response(prompt)

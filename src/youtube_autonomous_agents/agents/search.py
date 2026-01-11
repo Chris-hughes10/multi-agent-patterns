@@ -26,6 +26,50 @@ You ONLY search - you do not fetch transcripts or summarize. Other agents handle
 The results contain video_id fields that other agents can use to fetch transcripts."""
 
 
+GOAL_REASONING_PROMPT = """You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Searched YouTube and found these videos:
+{video_titles}
+
+QUESTION: Is the user's goal satisfied by just having these video links, or do they need more?
+
+Consider:
+- If they just want to find/discover videos → goal is SATISFIED
+- If they want specific information FROM the videos (temperatures, steps, details, etc.) → need TRANSCRIPTS
+- If they want analysis, summaries, or key points → need TRANSCRIPTS then SUMMARIZATION
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if not satisfied) describe what needs to happen next
+
+Example responses:
+SATISFIED: yes
+NEXT_STEP: none
+
+SATISFIED: no
+NEXT_STEP: Get transcripts from these videos and extract the specific cooking temperatures and times the user asked for"""
+
+
+QUERY_EXTRACTION_PROMPT = """Extract a YouTube search query from this user request.
+
+User request: "{goal}"
+
+Rules:
+- Return ONLY the search query, nothing else
+- Keep it concise (under 10 words ideally)
+- Include the main topic and any specific details (equipment, channels, techniques)
+- Remove meta-instructions like "summarize", "get transcripts", "I need to know"
+
+Examples:
+- "I want to cook a pork loin on a Kamado" → "pork loin kamado"
+- "Find videos about Python async programming and summarize them" → "Python async programming"
+- "Search for machine learning tutorials from 3Blue1Brown" → "machine learning 3Blue1Brown"
+
+Search query:"""
+
+
 class SearchAgent(BaseAgent):
     """Agent specialized for YouTube video search.
 
@@ -211,31 +255,12 @@ class SearchAgent(BaseAgent):
         :return: Dict with 'satisfied' (bool) and 'next_step' (str if not satisfied)
         """
         video_titles = [r["title"] for r in search_results.get("results", [])[:3]]
+        video_titles_formatted = "\n".join(f"- {title}" for title in video_titles)
 
-        prompt = f"""You are helping decide if a user's goal is satisfied.
-
-USER'S GOAL: "{goal}"
-
-WHAT I DID: Searched YouTube and found these videos:
-{chr(10).join(f'- {title}' for title in video_titles)}
-
-QUESTION: Is the user's goal satisfied by just having these video links, or do they need more?
-
-Consider:
-- If they just want to find/discover videos → goal is SATISFIED
-- If they want specific information FROM the videos (temperatures, steps, details, etc.) → need TRANSCRIPTS
-- If they want analysis, summaries, or key points → need TRANSCRIPTS then SUMMARIZATION
-
-Respond in this exact format:
-SATISFIED: yes or no
-NEXT_STEP: (only if not satisfied) describe what needs to happen next
-
-Example responses:
-SATISFIED: yes
-NEXT_STEP: none
-
-SATISFIED: no
-NEXT_STEP: Get transcripts from these videos and extract the specific cooking temperatures and times the user asked for"""
+        prompt = GOAL_REASONING_PROMPT.format(
+            goal=goal,
+            video_titles=video_titles_formatted,
+        )
 
         try:
             client = get_chat_client()
@@ -270,22 +295,7 @@ NEXT_STEP: Get transcripts from these videos and extract the specific cooking te
         :param goal: The user's goal
         :return: Extracted search query
         """
-        prompt = f"""Extract a YouTube search query from this user request.
-
-User request: "{goal}"
-
-Rules:
-- Return ONLY the search query, nothing else
-- Keep it concise (under 10 words ideally)
-- Include the main topic and any specific details (equipment, channels, techniques)
-- Remove meta-instructions like "summarize", "get transcripts", "I need to know"
-
-Examples:
-- "I want to cook a pork loin on a Kamado" → "pork loin kamado"
-- "Find videos about Python async programming and summarize them" → "Python async programming"
-- "Search for machine learning tutorials from 3Blue1Brown" → "machine learning 3Blue1Brown"
-
-Search query:"""
+        prompt = QUERY_EXTRACTION_PROMPT.format(goal=goal)
 
         try:
             client = get_chat_client()

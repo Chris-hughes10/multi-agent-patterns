@@ -37,6 +37,47 @@ Tips:
 - You can accept both full URLs and video IDs"""
 
 
+GOAL_REASONING_PROMPT = """You are helping decide if a user's goal is satisfied.
+
+USER'S GOAL: "{goal}"
+
+WHAT I DID: Fetched {transcript_count} transcript(s) from YouTube videos.
+{preview}
+
+QUESTION: Is the user's goal satisfied by just having these raw transcripts, or do they need more?
+
+Consider:
+- If they ONLY want the transcript text itself → goal is SATISFIED
+- If they want specific information extracted (temperatures, steps, times, etc.) → need SUMMARIZATION first
+- If they want key points, summaries, or answers to questions → need SUMMARIZATION first
+- If they want to save/export AND need analysis → SUMMARIZE FIRST, then save (summarization must come before saving!)
+
+IMPORTANT: If the goal mentions both "summarize" AND "save to file", the next step is SUMMARIZATION (the save comes after).
+
+Respond in this exact format:
+SATISFIED: yes or no
+NEXT_STEP: (only if not satisfied) describe what needs to happen next - focus on ANALYSIS/SUMMARIZATION, not file saving
+
+Example responses:
+SATISFIED: yes
+NEXT_STEP: none
+
+SATISFIED: no
+NEXT_STEP: Analyze these transcripts to extract the cooking temperatures, grill setup, and timing information the user asked for"""
+
+
+VIDEO_SELECTION_PROMPT = """Select the {max_count} most relevant videos for this user's request.
+
+USER'S REQUEST: "{goal}"
+
+AVAILABLE VIDEOS:
+{video_descriptions}
+
+Select videos that best match what the user asked for. Prioritize videos from any channels the user mentioned by name.
+
+Respond with ONLY the numbers of your choices, separated by commas (e.g., 1, 4, 7)"""
+
+
 class TranscriptAgent(BaseAgent):
     """Agent specialized for YouTube transcript operations.
 
@@ -271,33 +312,11 @@ class TranscriptAgent(BaseAgent):
             text = first.get("text", "")[:200]
             preview = f"Preview: {text}..."
 
-        prompt = f"""You are helping decide if a user's goal is satisfied.
-
-USER'S GOAL: "{goal}"
-
-WHAT I DID: Fetched {transcript_count} transcript(s) from YouTube videos.
-{preview}
-
-QUESTION: Is the user's goal satisfied by just having these raw transcripts, or do they need more?
-
-Consider:
-- If they ONLY want the transcript text itself → goal is SATISFIED
-- If they want specific information extracted (temperatures, steps, times, etc.) → need SUMMARIZATION first
-- If they want key points, summaries, or answers to questions → need SUMMARIZATION first
-- If they want to save/export AND need analysis → SUMMARIZE FIRST, then save (summarization must come before saving!)
-
-IMPORTANT: If the goal mentions both "summarize" AND "save to file", the next step is SUMMARIZATION (the save comes after).
-
-Respond in this exact format:
-SATISFIED: yes or no
-NEXT_STEP: (only if not satisfied) describe what needs to happen next - focus on ANALYSIS/SUMMARIZATION, not file saving
-
-Example responses:
-SATISFIED: yes
-NEXT_STEP: none
-
-SATISFIED: no
-NEXT_STEP: Analyze these transcripts to extract the cooking temperatures, grill setup, and timing information the user asked for"""
+        prompt = GOAL_REASONING_PROMPT.format(
+            goal=goal,
+            transcript_count=transcript_count,
+            preview=preview,
+        )
 
         try:
             client = get_chat_client()
@@ -346,16 +365,11 @@ NEXT_STEP: Analyze these transcripts to extract the cooking temperatures, grill 
             channel = video.get("channel", "Unknown")
             video_descriptions.append(f"{i + 1}. \"{title}\" by {channel}")
 
-        prompt = f"""Select the {max_count} most relevant videos for this user's request.
-
-USER'S REQUEST: "{goal}"
-
-AVAILABLE VIDEOS:
-{chr(10).join(video_descriptions)}
-
-Select videos that best match what the user asked for. Prioritize videos from any channels the user mentioned by name.
-
-Respond with ONLY the numbers of your choices, separated by commas (e.g., 1, 4, 7)"""
+        prompt = VIDEO_SELECTION_PROMPT.format(
+            max_count=max_count,
+            goal=goal,
+            video_descriptions="\n".join(video_descriptions),
+        )
 
         try:
             client = get_chat_client()
