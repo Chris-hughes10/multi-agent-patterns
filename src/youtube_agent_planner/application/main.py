@@ -9,7 +9,7 @@ This module provides the core driver functions that can be used by:
 import logging
 
 from youtube_agent_planner.agents.planner import PlannerAgent
-from youtube_agent_planner.patterns.dag_executor import DAGExecutor
+from youtube_agent_planner.infra.dag_executor import DAGExecutor
 from youtube_autonomous_agents.agents import (
     SearchAgent,
     SummarizeAgent,

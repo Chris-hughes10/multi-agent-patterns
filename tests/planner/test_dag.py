@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from youtube_agent_planner.patterns.dag_executor import (
+from youtube_agent_planner.infra.dag_executor import (
     DAGExecutor,
     DAGStep,
     ExecutionDAG,

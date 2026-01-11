@@ -8,8 +8,8 @@ import logging
 
 import click
 
-from youtube_agent_planner.main import create_planner, create_registry
-from youtube_agent_planner.patterns.dag_executor import DAGExecutor
+from youtube_agent_planner.application.main import create_planner, create_registry
+from youtube_agent_planner.infra.dag_executor import DAGExecutor
 from youtube_autonomous_agents.infra import AgentRegistry
 from youtube_autonomous_agents.infra.session import Session
 from youtube_autonomous_agents.models.handoff import PartialResult
@@ -19,7 +19,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("youtube_agent_planner.cli")
+logger = logging.getLogger("youtube_agent_planner.application")
 
 
 async def run_with_planning(
@@ -29,7 +29,7 @@ async def run_with_planning(
     """Run a request using the planner + DAG pattern with CLI output.
 
     This is a CLI-specific wrapper that adds user-facing output.
-    For programmatic use, use youtube_agent_planner.main.process_request().
+    For programmatic use, use youtube_agent_planner.application.main.process_request().
 
     :param request: User's natural language request
     :param registry: Agent registry with registered agents

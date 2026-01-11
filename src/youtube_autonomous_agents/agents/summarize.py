@@ -88,6 +88,14 @@ class SummarizeAgent(BaseAgent):
     returning structured data that can be used for variable resolution.
     """
 
+    def __init__(self, summarizer: TranscriptSummarizer | None = None) -> None:
+        """Initialize with optional summarizer instance.
+
+        :param summarizer: Optional TranscriptSummarizer instance for dependency injection
+        """
+        super().__init__()
+        self._summarizer = summarizer or TranscriptSummarizer()
+
     @property
     def name(self) -> str:
         """Return agent name."""
@@ -154,8 +162,6 @@ class SummarizeAgent(BaseAgent):
             video_id = task.context.get("video_id")
             title = task.context.get("title")
 
-            summarizer = TranscriptSummarizer()
-
             if video_id and not text:
                 # Summarize stored transcript
                 storage = TranscriptStorage()
@@ -176,7 +182,7 @@ class SummarizeAgent(BaseAgent):
                         "cached": True,
                     }
                 else:
-                    summary = await summarizer.summarize(
+                    summary = await self._summarizer.summarize(
                         transcript_text=stored.transcript.full_text,
                         video_title=stored.metadata.title,
                     )
@@ -188,7 +194,7 @@ class SummarizeAgent(BaseAgent):
                     }
             elif text:
                 # Summarize provided text
-                summary = await summarizer.summarize(
+                summary = await self._summarizer.summarize(
                     transcript_text=text,
                     video_title=title,
                 )
@@ -242,8 +248,6 @@ class SummarizeAgent(BaseAgent):
             transcripts = [{"text": text, "title": "Unknown", "video_id": None}]
 
         try:
-            summarizer = TranscriptSummarizer()
-
             # Combine all transcripts for cross-video synthesis
             combined_content = []
             for t in transcripts:
@@ -253,7 +257,7 @@ class SummarizeAgent(BaseAgent):
 
             all_transcripts = "\n\n".join(combined_content)
 
-            synthesized = await summarizer.summarize(
+            synthesized = await self._summarizer.summarize(
                 transcript_text=all_transcripts,
                 video_title="Multiple Videos",
                 system_prompt=SYNTHESIS_PROMPT.format(goal=goal),
