@@ -145,6 +145,21 @@ Respond with a JSON execution plan in the same format as before.
 """
 
 
+CREATE_PLAN_PROMPT = """Create an execution plan for this request:
+
+"{user_request}"
+
+Respond ONLY with a valid JSON object containing the plan. No other text."""
+
+
+REPLAN_USER_PROMPT = """The original goal was:
+
+"{original_goal}"
+
+Create a revised plan that works around the failure and still achieves the goal.
+Respond ONLY with a valid JSON object containing the plan."""
+
+
 class PlannerAgent:
     """Agent that creates execution DAGs from user requests.
 
@@ -202,11 +217,7 @@ class PlannerAgent:
         """
         chat_agent = self._get_chat_agent()
 
-        prompt = f"""Create an execution plan for this request:
-
-"{user_request}"
-
-Respond ONLY with a valid JSON object containing the plan. No other text."""
+        prompt = CREATE_PLAN_PROMPT.format(user_request=user_request)
 
         response = await chat_agent.run(prompt)
         return self._parse_dag_response(response.text, user_request)
@@ -251,12 +262,7 @@ Respond ONLY with a valid JSON object containing the plan. No other text."""
             tools=[],
         )
 
-        prompt = f"""The original goal was:
-
-"{original_goal}"
-
-Create a revised plan that works around the failure and still achieves the goal.
-Respond ONLY with a valid JSON object containing the plan."""
+        prompt = REPLAN_USER_PROMPT.format(original_goal=original_goal)
 
         response = await replan_agent.run(prompt)
         return self._parse_dag_response(response.text, original_goal)

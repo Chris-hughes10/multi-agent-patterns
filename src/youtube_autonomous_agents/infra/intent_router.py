@@ -17,6 +17,29 @@ if TYPE_CHECKING:
     from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 
+INTENT_ROUTING_PROMPT = """You are a task router for a multi-agent workflow. Route the intent to the FIRST agent needed.
+
+AVAILABLE AGENTS:
+{agents_text}
+
+INTENT TO ROUTE: "{intent}"
+
+Instructions:
+1. If the intent has MULTIPLE steps (e.g., "get transcripts AND summarize"), choose the FIRST step
+2. The workflow order is typically: search → transcript → summarize → writer
+3. Agent selection rules:
+   - If we need to FIND/SEARCH for videos → "search"
+   - If we need to GET/FETCH transcripts or captions → "transcript"
+   - If we already HAVE transcripts/text and need to analyze/summarize/extract → "summarize"
+   - If we need to SAVE/WRITE/EXPORT to a file → "writer"
+4. Key: "Get transcripts and then summarize" → choose "transcript" (first step)
+5. Key: "Summarize these transcripts" (transcripts already provided) → choose "summarize"
+6. Respond with ONLY the agent name (e.g., "search", "transcript", "summarize", "writer")
+7. If no agent can help, respond with "none"
+
+Agent name:"""
+
+
 class IntentRouter(ABC):
     """Abstract interface for routing intents to agents.
 
@@ -93,27 +116,7 @@ class LLMIntentRouter(IntentRouter):
 
         agents_text = "\n".join(agent_descriptions)
 
-        prompt = f"""You are a task router for a multi-agent workflow. Route the intent to the FIRST agent needed.
-
-AVAILABLE AGENTS:
-{agents_text}
-
-INTENT TO ROUTE: "{intent}"
-
-Instructions:
-1. If the intent has MULTIPLE steps (e.g., "get transcripts AND summarize"), choose the FIRST step
-2. The workflow order is typically: search → transcript → summarize → writer
-3. Agent selection rules:
-   - If we need to FIND/SEARCH for videos → "search"
-   - If we need to GET/FETCH transcripts or captions → "transcript"
-   - If we already HAVE transcripts/text and need to analyze/summarize/extract → "summarize"
-   - If we need to SAVE/WRITE/EXPORT to a file → "writer"
-4. Key: "Get transcripts and then summarize" → choose "transcript" (first step)
-5. Key: "Summarize these transcripts" (transcripts already provided) → choose "summarize"
-6. Respond with ONLY the agent name (e.g., "search", "transcript", "summarize", "writer")
-7. If no agent can help, respond with "none"
-
-Agent name:"""
+        prompt = INTENT_ROUTING_PROMPT.format(agents_text=agents_text, intent=intent)
 
         try:
             response = await self._client.get_response(prompt)
