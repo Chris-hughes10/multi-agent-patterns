@@ -156,6 +156,78 @@ The agent still calls the same `search_youtube` service. But now it also reasons
 
 This is philosophically different from most agent frameworks. The agent isn't just executing a command - it's understanding intent and deciding the appropriate next step.
 
+### The Complexity Trade-Off
+
+Let's be explicit about what this costs. Here's the complete V1 SearchAgent:
+
+```python
+# V1 SearchAgent - 30 lines total (entire file)
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent..."""
+
+def create_search_agent() -> ChatAgent:
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
+```
+
+And here's the V2 SearchAgent structure:
+
+```python
+# V2 SearchAgent - 360+ lines
+SEARCH_INSTRUCTIONS = """..."""
+GOAL_REASONING_PROMPT = """..."""
+QUERY_EXTRACTION_PROMPT = """..."""
+
+class SearchAgent(BaseAgent):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def capabilities(self) -> list[str]: ...
+
+    @property
+    def description(self) -> str: ...
+
+    async def execute(self, task: Task) -> TaskResult:
+        """For DAG pattern compatibility."""
+        ...
+
+    async def execute_autonomous(self, goal: str, state: dict) -> HandoffResult:
+        """Goal-aware execution with handoff decisions."""
+        # Handle parallel results recovery
+        # Extract query from goal (LLM call)
+        # Execute search
+        # Reason about goal satisfaction (LLM call)
+        # Return complete or handoff
+        ...
+
+    async def _reason_about_goal(self, goal: str, results: dict) -> dict:
+        """LLM-based goal satisfaction reasoning."""
+        ...
+
+    async def _extract_query_from_goal(self, goal: str) -> str:
+        """LLM-based query extraction."""
+        ...
+
+    def _interleave_videos(self, video_lists: list) -> list:
+        """Merge parallel search results."""
+        ...
+```
+
+The V2 agents are **10-12x larger** because they:
+
+1. **Reason about goal satisfaction** - "Is the user's goal met, or should someone continue?"
+2. **Decide whether to complete or hand off** - with explicit `HandoffResult` types
+3. **Handle parallel task merging** - interleaving results from fan-out operations
+4. **Extract intents from natural language** - parsing complex requests into actions
+
+This is the cost of distributed intelligence. When you move decision-making from a central orchestrator into every agent, each agent needs the machinery to make those decisions. The orchestrator pattern centralizes this complexity; the autonomous pattern distributes it.
+
+**Is it worth it?** That depends on your use case. For simple, predictable workflows, the V1 pattern's simplicity is a feature. For adaptive workflows with parallelism opportunities, the V2 pattern's per-agent reasoning enables capabilities that are hard to achieve with central coordination.
+
 ### Why This Matters
 
 **No context bottleneck**: State flows forward through the chain, not back to a central point. Each agent only sees what's relevant.
