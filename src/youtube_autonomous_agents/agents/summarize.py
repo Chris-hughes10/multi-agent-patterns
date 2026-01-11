@@ -2,9 +2,13 @@
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
+
+if TYPE_CHECKING:
+    from agent_framework.azure import AzureOpenAIChatClient
+
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.summarizer import TranscriptSummarizer
 from youtube_agent_orchestrator.tools.summarize import summarize_stored_transcript, summarize_text
@@ -88,13 +92,19 @@ class SummarizeAgent(BaseAgent):
     returning structured data that can be used for variable resolution.
     """
 
-    def __init__(self, summarizer: TranscriptSummarizer | None = None) -> None:
-        """Initialize with optional summarizer instance.
+    def __init__(
+        self,
+        summarizer: TranscriptSummarizer | None = None,
+        client: "AzureOpenAIChatClient | None" = None,
+    ) -> None:
+        """Initialize with optional dependencies.
 
         :param summarizer: Optional TranscriptSummarizer instance for dependency injection
+        :param client: Optional chat client for dependency injection
         """
         super().__init__()
         self._summarizer = summarizer or TranscriptSummarizer()
+        self._client = client or get_chat_client()
 
     @property
     def name(self) -> str:
@@ -316,7 +326,7 @@ class SummarizeAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             text = response.text.strip()
 

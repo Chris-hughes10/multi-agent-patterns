@@ -3,9 +3,13 @@
 import logging
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
+
+if TYPE_CHECKING:
+    from agent_framework.azure import AzureOpenAIChatClient
+
 from youtube_agent_orchestrator.services.youtube import search_youtube
 from youtube_agent_orchestrator.tools.search import search_youtube_structured
 from youtube_autonomous_agents.agents.base import BaseAgent
@@ -78,6 +82,14 @@ class SearchAgent(BaseAgent):
     Uses the search_youtube service directly for DAG execution,
     returning structured data that can be used for variable resolution.
     """
+
+    def __init__(self, client: "AzureOpenAIChatClient | None" = None) -> None:
+        """Initialize with optional chat client.
+
+        :param client: Optional chat client for dependency injection
+        """
+        super().__init__()
+        self._client = client or get_chat_client()
 
     @property
     def name(self) -> str:
@@ -263,7 +275,7 @@ class SearchAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             text = response.text.strip()
 
@@ -298,7 +310,7 @@ class SearchAgent(BaseAgent):
         prompt = QUERY_EXTRACTION_PROMPT.format(goal=goal)
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             query = response.text.strip().strip('"').strip("'")
             # Sanity check - if response is too long, it's probably not a query

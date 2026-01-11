@@ -4,9 +4,13 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
+
+if TYPE_CHECKING:
+    from agent_framework.azure import AzureOpenAIChatClient
+
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import extract_video_id, fetch_transcript
 from youtube_agent_orchestrator.tools.transcript import (
@@ -87,6 +91,20 @@ class TranscriptAgent(BaseAgent):
     returning structured data that can be used for variable resolution.
     """
 
+    def __init__(
+        self,
+        storage: TranscriptStorage | None = None,
+        client: "AzureOpenAIChatClient | None" = None,
+    ) -> None:
+        """Initialize with optional dependencies.
+
+        :param storage: Optional TranscriptStorage instance for dependency injection
+        :param client: Optional chat client for dependency injection
+        """
+        super().__init__()
+        self._storage = storage or TranscriptStorage()
+        self._client = client or get_chat_client()
+
     @property
     def name(self) -> str:
         """Return agent name."""
@@ -154,8 +172,7 @@ class TranscriptAgent(BaseAgent):
             video_id = self._extract_video_id(task)
 
             # Check storage first
-            storage = TranscriptStorage()
-            stored = await asyncio.to_thread(storage.load, video_id)
+            stored = await asyncio.to_thread(self._storage.load, video_id)
 
             if stored:
                 # Return cached transcript
@@ -170,7 +187,7 @@ class TranscriptAgent(BaseAgent):
                 result = await fetch_transcript(video_id)
 
                 # Save to storage
-                await asyncio.to_thread(storage.save, result)
+                await asyncio.to_thread(self._storage.save, result)
 
                 output = {
                     "video_id": video_id,
@@ -225,7 +242,6 @@ class TranscriptAgent(BaseAgent):
                 )
 
         try:
-            storage = TranscriptStorage()
             transcripts = []
             errors = []  # Track per-video errors for graceful degradation
 
@@ -233,7 +249,7 @@ class TranscriptAgent(BaseAgent):
                 # Single video
                 logger.info("Fetching transcript for single video: %s", video_id)
                 try:
-                    output = await self._fetch_single_transcript(storage, video_id)
+                    output = await self._fetch_single_transcript(video_id)
                     logger.info("  Got transcript: %s (%d chars)", output.get("title", "Unknown"), len(output.get("text", "")))
                     transcripts.append(output)
                 except Exception as e:
@@ -253,7 +269,7 @@ class TranscriptAgent(BaseAgent):
                     if isinstance(vid, str):
                         logger.info("  Fetching: %s - %s", vid, search_title or "Unknown")
                         try:
-                            output = await self._fetch_single_transcript(storage, vid)
+                            output = await self._fetch_single_transcript(vid)
                             # Use search title if transcript title is missing
                             if search_title and (not output.get("title") or output.get("title") == "Unknown"):
                                 output["title"] = search_title
@@ -319,7 +335,7 @@ class TranscriptAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             text = response.text.strip()
 
@@ -372,7 +388,7 @@ class TranscriptAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             text = response.text.strip()
 
@@ -403,16 +419,14 @@ class TranscriptAgent(BaseAgent):
 
     async def _fetch_single_transcript(
         self,
-        storage: TranscriptStorage,
         video_id: str,
     ) -> dict[str, Any]:
         """Fetch a single transcript and return structured data.
 
-        :param storage: TranscriptStorage instance
         :param video_id: Video ID to fetch
         :return: Structured transcript data
         """
-        stored = await asyncio.to_thread(storage.load, video_id)
+        stored = await asyncio.to_thread(self._storage.load, video_id)
 
         if stored:
             return {
@@ -423,7 +437,7 @@ class TranscriptAgent(BaseAgent):
             }
 
         result = await fetch_transcript(video_id)
-        await asyncio.to_thread(storage.save, result)
+        await asyncio.to_thread(self._storage.save, result)
 
         return {
             "video_id": video_id,

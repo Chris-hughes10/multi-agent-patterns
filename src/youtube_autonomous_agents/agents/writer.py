@@ -2,9 +2,13 @@
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
+
+if TYPE_CHECKING:
+    from agent_framework.azure import AzureOpenAIChatClient
+
 from youtube_agent_orchestrator.tools.writer import write_markdown_file, write_timestamped_markdown
 from youtube_autonomous_agents.agents.base import BaseAgent
 from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
@@ -70,6 +74,14 @@ class WriterAgent(BaseAgent):
     Uses writer tools from V1 to export content to markdown files
     with support for custom filenames and timestamps.
     """
+
+    def __init__(self, client: "AzureOpenAIChatClient | None" = None) -> None:
+        """Initialize with optional chat client.
+
+        :param client: Optional chat client for dependency injection
+        """
+        super().__init__()
+        self._client = client or get_chat_client()
 
     @property
     def name(self) -> str:
@@ -196,7 +208,7 @@ class WriterAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             content = response.text.strip()
 
@@ -291,7 +303,7 @@ class WriterAgent(BaseAgent):
         )
 
         try:
-            client = get_chat_client()
+            client = self._client
             response = await client.get_response(prompt)
             filename = response.text.strip().strip('"').strip("'").lower()
 
