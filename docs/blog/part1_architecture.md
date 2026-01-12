@@ -1,12 +1,15 @@
-# Architecting Multi-Agent Systems: Lessons from Building a YouTube Research Assistant
+# Architecting Multi-Agent Systems: Evolving Proven Patterns to Agentic Systems
 
-The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, Semantic Kernel - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
+Since the release of ChatGPT, AI agents have captured everyone's imagination. The promise is compelling: give an AI system a goal, let it break down the problem, use tools to gather information, and synthesize a result.
 
-I wanted to go beyond that. Not to build something enterprise-scale, but to build something **non-trivial yet clean** - and to explore different architectural patterns, understand their complexity, and learn their trade-offs. My ambition was to start with the well-understood orchestrator pattern, then explore more advanced patterns such as planning-based approaches and autonomous agents that can self-assign and delegate to each other - demonstrating that agentic systems can be architected with the same discipline we apply to any serious software project.
+The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, Semantic Kernel, Microsoft's Agent Framework - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
 
-## The Problem That Motivated This
 
-I'm a cooking enthusiast, and one of my favourite areas is BBQ. Unlike other culinary domains where high-quality cookbooks abound, the best BBQ knowledge lives on YouTube. Channels like Chuds BBQ, Fork and Embers, and Mad Scientist BBQ have content that rivals any cookbook - but the knowledge is locked in video format. When I'm planning a cook, I find myself:
+I wanted to build something more ambitious than this; to explore different architectural patterns, understand their complexity, and learn their trade-offs. My ambition was to start with the well-understood orchestrator pattern, then explore more advanced ideas such as planning-based approaches and autonomous agents that can self-assign and delegate to each other; demonstrating that agentic systems can be architected with the same discipline we apply to any serious software project.
+
+## Choosing a problem domain
+
+I'm a cooking enthusiast, and one of my favourite cuisines is barbecue. Unlike other culinary domains where high-quality cookbooks are abundant, it's scattered across YouTube channels like *Chuds BBQ*, *Fork and Embers*, and *Mad Scientist BBQ*. These channels offer content that rivals any cookbook, but the knowledge is locked in video format, which makes it difficult to quickly find and reference specific techniques or information. When planning a cook, I often find myself:
 
 1. Searching across multiple channels for a specific technique
 2. Watching (or skipping through) several videos
@@ -15,9 +18,8 @@ I'm a cooking enthusiast, and one of my favourite areas is BBQ. Unlike other cul
 
 This felt like a good candidate for automation. Search YouTube, fetch transcripts, extract the relevant information, synthesise it into a reference document. Four distinct capabilities, potentially handled by specialized agents.
 
-But more importantly, it felt like a good test case for a question I had: **can you build a multi-agent system that doesn't become an unmaintainable mess?**
+But more importantly, it felt like a good test case as it is non-trivial but straightforward; complex enough to require multiple agents and tools, but simple enough to focus on architecture rather than domain complexity.
 
-Most agent code I've seen mixes everything together - LLM calls, API integrations, business logic, formatting - in ways that would make any software engineer wince. I wanted to prove that the patterns we use for clean architecture in traditional systems apply equally to agent systems.
 
 ## In this article, we shall cover:
 
@@ -30,13 +32,18 @@ For this project, I'm using the [Microsoft Agent Framework](https://github.com/m
 
 That said, the specific framework matters less than the principles. What follows applies whether you're using the Microsoft Agent Framework, LangChain, or building your own orchestration.
 
-Let's start with the problem.
 
 ---
 
 ## The Architecture Challenge
 
-Agent code gets messy fast. Here's the pattern I've seen repeatedly in tutorials and prototypes - agents, tools, prompts, and orchestration logic all tangled together:
+Whilst researching how to get started, I noticed a common theme: most frameworks make it easy to build demos, but they don't guide you towards creating an architecture that is maintainable and extensible.
+
+In a lot of the code I encountered, the lines between LLM calls, tool integrations, business logic, and orchestration were blurred. In software engineering—we've known about separation of concerns for decades. But in the agent space, the frameworks prioritize "getting started quickly" over architectural guidance. The tutorials optimize for "look how easy!" rather than "look how maintainable!" 
+
+Understanding where to draw these boundaries is the difference between a system that scales and one that collapses under its own complexity.
+
+As an example, here's a simplified version of a monolithic approach that mixes everything together:
 
 ```python
 # orchestrator.py - agents, tools, prompts, and business logic all in one
@@ -91,24 +98,181 @@ def run_research(query: str) -> str:
     return summary
 ```
 
-This works for a demo. But it has serious problems:
+This works for a demo, and can be absolutely the right approach for validating ideas quickly. But it has serious problems:
 
-- **Untestable** - Can't test agents without hitting real APIs
+- **Difficult to test** agents without hitting real APIs
 - **Not reusable** - Tools are trapped inside this function
 - **Hard to extend** - Adding a new agent means modifying this monolith
 - **Impossible to modify in isolation** - Changing one agent risks breaking others
 - **Prompts scattered everywhere** - No single place to tune agent behaviour
 
-The core insight that changed our architecture: **LLM-callable functions have fundamentally different concerns than business logic**. Separating them unlocks testability and reusability.
+With this as our starting point, let's explore how we can improve things. 
 
-### The Layered Architecture
+### What Makes This an Architectural Problem
+When an LLM "calls a tool", it's doing two distinct things:
 
-We settled on six layers, each with a single, well-defined responsibility. If you're familiar with Domain-Driven Design, you'll recognise the structure:
+1. Invoking a function with simple parameters (strings, numbers)
+2. Interpreting a string result
+
+But the actual work - searching YouTube, parsing HTML, handling errors - is complex. It involves configuration, error handling, retries, and returns rich objects with multiple fields.
+
+These are different concerns. The LLM needs simple strings. Your application needs proper abstractions. Conflating them is like putting SQL queries directly in your view layer—it works, but it's architecturally wrong.
+
+These are two separate responsibilities that we've been mixing together. Separating them unlocks testability, reusability, and clarity.
+
+## So, What Does Separation Look Like?
+
+I settled on splitting these concerns in the following way:
+
+### Tools = LLM Interface
+
+Tools are thin wrappers that translate between LLM and application. They:
+
+- Accept simple parameters (strings, numbers, booleans)
+- Call the appropriate service
+- Format the result as a string the LLM can understand
+- Are stateless
+
+```python
+# tools/transcript.py
+
+async def fetch_video_transcript(
+    video_id: Annotated[str, Field(description="YouTube video ID")]
+) -> str:
+    """Fetch the transcript for a YouTube video.
+
+    Returns the full transcript text with video metadata.
+    """
+    result = await fetch_transcript(video_id)  # calls service
+
+    ## Format for LLM
+    return f"Transcript for '{result.metadata.title}':\n\n{result.transcript.full_text}"
+```
+
+Notice what the tool does NOT do:
+- No configuration management
+- No error handling beyond basic formatting
+- No complex return types
+- No business logic
+
+This tool does one thing: call the service and format the result. No API calls, no error handling, no business logic. Just adaptation.
+
+### Services = Business Logic
+
+Services contain the real implementation. They:
+
+- Are reusable classes with configuration
+- Return rich domain objects (models)
+- Can be called from anywhere (CLI, tests, other services)
+- May maintain state or connections
+
+```python
+# services/youtube.py
+
+class YouTubeTranscriptFetcher:
+    """Fetches transcripts from YouTube videos."""
+
+    def __init__(self, proxy_url: str | None = None):
+        self.proxy_url = proxy_url
+
+    async def fetch(
+        self,
+        video_id: str,
+        languages: list[str] | None = None
+    ) -> TranscriptResult:
+        """Fetch transcript with full metadata.
+
+        Returns a TranscriptResult containing the transcript text,
+        video metadata, and language information.
+        """
+        # Real implementation with error handling, retries, etc.
+        raw_transcript = await self._fetch_from_api(video_id, languages)
+        metadata = await self._fetch_metadata(video_id)
+
+        return TranscriptResult(
+            metadata=metadata,
+            transcript=Transcript(
+                full_text=self._format_transcript(raw_transcript),
+                segments=raw_transcript,
+                language=self._detect_language(raw_transcript),
+            ),
+        )
+```
+
+This is where complexity lives. Configuration, caching, error handling, retries, typed returns. And crucially: it's reusable without the LLM.
+
+### The Flow
+
+When the LLM decides to fetch a transcript:
+
+```
+LLM decides to call "fetch_video_transcript"
+    ↓
+tools/transcript.py::fetch_video_transcript(video_id)
+    ↓
+services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
+    ↓
+Returns TranscriptResult object
+    ↓
+Tool formats as string for LLM
+```
+
+### Why This Matters
+
+**1. Reusability** - Services can be called from the CLI directly, from tests, or from scripts, without going through the LLM:
+
+```python
+# Use from CLI, bypassing agents entirely
+@click.command()
+def download_transcript(video_id: str, output: str):
+    fetcher = YouTubeTranscriptFetcher()
+    result = fetcher.fetch(video_id)
+    Path(output).write_text(result.transcript.full_text)
+
+# Use in tests without mocking LLM
+def test_fetcher_handles_unavailable_videos():
+    fetcher = YouTubeTranscriptFetcher()
+    with pytest.raises(TranscriptDisabledError):
+        fetcher.fetch("video_with_disabled_transcript")
+
+# Use in batch processing
+async def process_videos(video_ids: list[str]):
+    fetcher = YouTubeTranscriptFetcher()
+    results = await asyncio.gather(*[fetcher.fetch(id) for id in video_ids])
+    return results
+```
+
+**2. Testability** - Services return typed objects that are easy to assert against. Tools return formatted strings which are harder to validate:
+
+```python
+# Testing a service - clear assertions
+def test_fetcher_returns_transcript():
+    result = fetcher.fetch("abc123")
+    assert result.transcript.full_text
+    assert result.metadata.video_id == "abc123"
+    assert result.transcript.language in ["en", "en-US"]
+
+# Testing a tool - string parsing required
+def test_tool_formats_correctly():
+    output = fetch_video_transcript("abc123")
+    assert "## " in output  # Has title?
+    assert "Transcript" in output  # Has section header?
+    # Much harder to validate structure
+```
+
+**3. Separation of Concerns** - Tool code handles "how to present to LLM", service code handles "how to actually do it". When YouTube's API changes, only `services/youtube.py` needs updating. When we want different output formatting, only the tool changes.
+
+This isn't theoretical—I've refactored the YouTube service twice without touching tool definitions or agent logic. That's only possible with clear boundaries.
+
+## The Layered Architecture
+
+The tools/services split is one boundary. But a complete agent system needs more structure. After some experimentation, I settled on a layered architecture that cleanly separates concerns; six layers, each with a single, well-defined responsibility. If you're familiar with Domain-Driven Design, you'll recognise the structure:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   presentation/                         │
-│              User-facing command interface              │
+│              User-facing command interface              |
+|                   (e.g. CLI, Web, API)                  │
 │                                                         │
 │                   [Presentation Layer]                  │
 └─────────────────────────────────────────────────────────┘
@@ -161,6 +325,15 @@ We settled on six layers, each with a single, well-defined responsibility. If yo
 Here's what this looks like in practice:
 
 ```python
+# presentation/cli.py - Presentation layer (user interface whether)
+@click.command()
+def search(query: str):
+    """Search for videos on YouTube."""
+    agent = create_search_agent()
+    result = agent.run(query)
+    click.echo(result)
+
+
 # agents/search.py - Agent layer (configuration only)
 def create_search_agent() -> ChatAgent:
     """Factory function that creates a Search Agent."""
@@ -171,18 +344,21 @@ def create_search_agent() -> ChatAgent:
         tools=[search_youtube_formatted],
     )
 
+
 # tools/search.py - Tool layer (thin LLM adapter)
-async def search_youtube(query: str) -> str:
+async def search_youtube_formatted(query: str) -> str:
     """Search YouTube for videos matching the query."""
-    results = await youtube_service.search(query)  # Calls service
-    return format_for_llm(results)                 # Formats for LLM
+    results = await search_youtube(query)  # Calls service
+    return format_for_llm(results)         # Formats for LLM
+
 
 # services/youtube.py - Service layer (business logic)
-class YouTubeService:
-    async def search(self, query: str) -> list[VideoResult]:
-        """Search YouTube - returns rich domain objects."""
-        response = await self._client.search(query)
-        return [VideoResult.from_response(v) for v in response]
+async def search_youtube(query: str) -> list[VideoResult]:
+    """Search YouTube - returns rich domain objects."""
+    url = build_search_url(query)
+    html = await fetch_html(url)  # calls infra
+    return parse_video_results(html)
+
 
 # models/search.py - Model layer (domain objects)
 @dataclass
@@ -190,11 +366,20 @@ class VideoResult:
     video_id: str
     title: str
     channel: str
+
+
+# infra/http_client.py - Infrastructure layer (HTTP transport)
+async def fetch_html(url: str, timeout: float = 10.0) -> str:
+    """Fetch HTML content with browser-like headers."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
+        response.raise_for_status()
+        return response.text
 ```
 
 Each layer has a single responsibility: agents configure behaviour, tools adapt for LLMs, services implement logic, models define structure. Testing is straightforward - mock at the layer boundary, not deep inside.
 
-The DDD mapping isn't forced - it emerges naturally because agent systems have the same concerns as any complex application:
+The DDD mapping isn't forced - it emerges naturally because agentic systems have the same concerns as any complex application:
 
 | Layer | DDD Concept | Agent System Role |
 |-------|-------------|-------------------|
@@ -209,144 +394,42 @@ The `tools/` layer as an Anti-Corruption Layer is particularly interesting. In D
 
 The flow is strictly downward. Agents use tools. Tools call services. Services work with models. This constraint forces clear thinking about where code belongs.
 
----
+### When This Architecture Matters
+Is this overkill for simple projects? Maybe. But consider when you need it:
+- You're building more than a demo - If this will run in production, maintainability matters from day one.
+- You're using AI coding assistants - Tools like GitHub Copilot and Claude Code work significantly better with well-structured code. Clear boundaries and consistent patterns make AI-assisted development more effective.
+- Multiple people will work on it - Clear boundaries make collaboration possible. Different developers can own different services.
+- You need to test it properly - Without the tools/services split, testing requires mocking LLMs or running expensive agent calls.
+- The domain is complex - Multiple external APIs, complex business logic, rich data models. The architecture scales with complexity.
+- You'll extend it - Adding new capabilities shouldn't require refactoring existing code. The layered architecture supports extension.
 
-## Tools vs Services: The Key Distinction
+I've found that the "mess" in agentic systems happens gradually. You start with inline tools because it's faster. Then you need to reuse one. Then you need to test something. Then you need error handling. Each change makes the code more tangled.
 
-This is the most important architectural decision to understand.
+By the time you realize you need better architecture, refactoring is painful. I've learned this the hard way—I once asked an AI assistant to help refactor a tangled codebase and spent hours in debugging hell. The AI confidently propagated the existing confusion into new, subtly broken code. Starting with clear layers costs more upfront but saves significant pain later.
 
-When an LLM "calls a tool", it's really doing two things: **invoking a function** and **interpreting the result**. The function needs to accept simple parameters (strings, numbers) and return text the LLM can reason about. That's it.
+### Architecture in the Age of AI Coding Assistants
+There's another dimension to this that's become increasingly relevant: well-architected code works better with AI coding assistants.
+A
+s tools like GitHub Copilot, Cursor, and Claude Code become standard parts of development workflows, I've noticed something interesting: they're much more effective when working with clearly structured code than with greenfield or tangled codebases; especially when paired with a documentation to provide context.
 
-But the actual work - searching YouTube, parsing HTML, handling errors - is complex. It involves configuration, error handling, and returns rich objects with multiple fields.
+When I ask Claude Code to "implement a feature to filter search results by minimum duration," it knows exactly where to look: `services/youtube.py`. The service has clear boundaries, typed interfaces, and follows consistent patterns. The AI can reason about the change without needing to understand the entire system.
 
-We split these concerns:
+Compare this to asking it to modify inline tools scattered across orchestration code. The AI needs to:
 
-### Tools = LLM Interface
+- Figure out where the tool is defined
+- Understand how it's coupled to the agent
+- Determine if changes will break other parts
+- Navigate tangled dependencies
 
-Tools are thin wrappers. They:
+The same architectural principles that make code maintainable for humans make it navigable for AI assistants:
+- Clear boundaries - The AI can focus on one layer without understanding the entire stack. "Modify the tool" vs "modify the service" are distinct, scoped tasks.
+- Consistent patterns - Once the AI understands the pattern (tools call services, services return typed objects), it can apply that pattern consistently across changes.
+- Explicit types - Type hints aren't just documentation - they're constraints the AI can use to generate correct code. When TranscriptResult has a defined structure, the AI knows what fields are available.
+- Single responsibility - Each component does one thing. The AI doesn't need to reason about multiple concerns when modifying a service.
 
-- Accept simple parameters (strings, numbers, booleans)
-- Call the appropriate service
-- Format the result as a string the LLM can understand
-- Are stateless
+This isn't about making code "AI-friendly" at the expense of good design. It's that good design principles—the same ones we've refined over decades—happen to be exactly what makes code comprehensible to AI systems.
 
-```python
-# tools/transcript.py
-
-async def fetch_video_transcript(
-    video_id: Annotated[str, Field(description="YouTube video ID")]
-) -> str:
-    """Fetch the transcript for a YouTube video.
-
-    Returns the full transcript text with video metadata.
-    """
-    result = await fetch_transcript(video_id)  # calls service
-
-    return f"""## {result.metadata.title}
-Channel: {result.metadata.channel}
-Duration: {result.metadata.duration}
-
-### Transcript
-{result.transcript.full_text}
-"""
-```
-
-Notice what the tool does NOT do:
-- No configuration management
-- No error handling beyond basic formatting
-- No complex return types
-- No business logic
-
-### Services = Business Logic
-
-Services contain the real implementation. They:
-
-- Are reusable classes with configuration
-- Return rich domain objects (models)
-- Can be called from anywhere (CLI, tests, other services)
-- May maintain state or connections
-
-```python
-# services/youtube.py
-
-class YouTubeTranscriptFetcher:
-    """Fetches transcripts from YouTube videos."""
-
-    def __init__(self, proxy_url: str | None = None):
-        self.proxy_url = proxy_url
-
-    async def fetch(
-        self,
-        video_id: str,
-        languages: list[str] | None = None
-    ) -> TranscriptResult:
-        """Fetch transcript with full metadata.
-
-        Returns a TranscriptResult containing the transcript text,
-        video metadata, and language information.
-        """
-        # Real implementation with error handling, retries, etc.
-        raw_transcript = await self._fetch_from_api(video_id, languages)
-        metadata = await self._fetch_metadata(video_id)
-
-        return TranscriptResult(
-            metadata=metadata,
-            transcript=Transcript(
-                full_text=self._format_transcript(raw_transcript),
-                segments=raw_transcript,
-                language=self._detect_language(raw_transcript),
-            ),
-        )
-```
-
-### The Flow
-
-When the LLM decides to fetch a transcript:
-
-```
-LLM decides to call "fetch_video_transcript"
-    ↓
-tools/transcript.py::fetch_video_transcript(video_id)
-    ↓
-services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
-    ↓
-Returns TranscriptResult object
-    ↓
-Tool formats as string for LLM
-```
-
-### Why This Matters
-
-**1. Reusability** - Services can be called from the CLI directly, from tests, or from scripts, without going through the LLM:
-
-```python
-# CLI command that bypasses the agent entirely
-@click.command()
-def download_transcript(video_id: str, output: str):
-    fetcher = YouTubeTranscriptFetcher()
-    result = fetcher.fetch(video_id)
-    Path(output).write_text(result.transcript.full_text)
-```
-
-**2. Testability** - Services return typed objects that are easy to assert against. Tools return formatted strings which are harder to validate:
-
-```python
-# Testing a service - clear assertions
-def test_fetcher_returns_transcript():
-    result = fetcher.fetch("abc123")
-    assert result.transcript.full_text
-    assert result.metadata.video_id == "abc123"
-    assert result.transcript.language in ["en", "en-US"]
-
-# Testing a tool - string parsing required
-def test_tool_formats_correctly():
-    output = fetch_video_transcript("abc123")
-    assert "## " in output  # Has title?
-    assert "Transcript" in output  # Has section header?
-    # Much harder to validate structure
-```
-
-**3. Separation of Concerns** - Tool code handles "how to present to LLM", service code handles "how to actually do it". When YouTube's API changes, only `services/youtube.py` needs updating. When we want different output formatting, only the tool changes.
+As AI coding assistants become more prevalent, architectural discipline becomes even more valuable. The codebases that benefit most from AI assistance are the ones that are already well-structured. The messy codebases stay messy, because the AI amplifies the existing patterns—good or bad.
 
 ---
 
@@ -397,6 +480,8 @@ Grouping them together provides:
 **Replaceability** - Want to add Vimeo support? Create `services/vimeo.py` with the same interface. The rest of the system doesn't change.
 
 **Discoverability** - "Where's YouTube logic?" → `services/youtube.py`. Simple.
+
+**AI Comprehension** - Consistent domain language means AI assistants share your vocabulary. When everything YouTube-related uses "video_id" and "channel", the AI can reason about changes without confusion.
 
 ### The Litmus Test
 
