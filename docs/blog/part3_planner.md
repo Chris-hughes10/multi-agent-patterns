@@ -367,21 +367,21 @@ While our reference implementation doesn't implement model tier selection (all a
 
 ### Cost Analysis
 
-| Pattern | LLM Calls | Token Usage* | Est. Cost** | Key Characteristic |
-|---------|-----------|--------------|-------------|-------------------|
-| **V1 Orchestrator** | ~6 | ~5K in / ~2K out | ~$0.04 | Context grows at center |
-| **V2 Autonomous** | ~10 | ~8K in / ~3K out | ~$0.06 | Every agent reasons about goal |
-| **V3 Planner+DAG** | ~4 | ~3K in / ~1.5K out | ~$0.03 | Single planning call, then execute |
+| Pattern | LLM Calls* | Why |
+|---------|-----------|-----|
+| **V1 Orchestrator** | 37 | Nested agents: orchestrator delegates to sub-agents, each running its own agentic loop |
+| **V2 Autonomous** | 16 | Flat agents with routing + goal reasoning at each step |
+| **V3 Planner+DAG** | 4 | Single planning call, then mechanical execution via direct service calls |
 
-*Token estimates for a "search → transcript → summarize" workflow.*
-**Based on GPT-5.2 pricing: $1.75/1M input, $14.00/1M output tokens.*
+*Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation.*
 
-The cost differences may seem small per-request, but they compound at scale. Processing 10,000 requests daily:
-- V1: ~$400/day
-- V2: ~$600/day
-- V3: ~$300/day
+The difference is dramatic: **V3 uses 9x fewer LLM calls than V1** and 4x fewer than V2.
 
-The key insight isn't just raw cost - it's **predictability**. With V3, you know the token budget before execution starts.
+Why is V1 so expensive? The orchestrator pattern uses hierarchical agents—the orchestrator delegates to sub-agents like SearchAgent and TranscriptAgent, but each sub-agent is itself a ChatAgent with tools. Every tool call in an agentic loop requires an LLM round-trip. When you have agents calling agents, those costs multiply.
+
+V3 eliminates this overhead entirely. The planner makes one LLM call to create the execution DAG, then steps execute by calling services directly—no per-step reasoning, no nested agent loops.
+
+The key insight isn't just raw cost—it's **predictability**. With V3, you know the LLM budget before execution starts.
 
 ### When to Use Each Pattern
 
@@ -587,8 +587,6 @@ The Planner+DAG pattern is implemented in `youtube_agent_planner/` as a separate
 - 🟡 Re-planning on failure (stubbed in code, needs wiring)
 
 **Note**: The economic argument for the Planner pattern is sound - upfront planning *does* reduce redundant LLM reasoning. However, the specific optimization of using different model tiers per step is an enhancement the pattern enables rather than a current feature. The core value is inspectable plans and predictable execution flow.
-
-See [PLANNER_STATUS_REPORT.md](../PLANNER_STATUS_REPORT.md) for detailed implementation assessment.
 
 ---
 

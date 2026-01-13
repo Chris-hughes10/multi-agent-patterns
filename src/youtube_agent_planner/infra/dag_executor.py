@@ -17,7 +17,7 @@ from youtube_autonomous_agents.infra.session import ExecutionStep, Session
 from youtube_autonomous_agents.models.handoff import PartialResult
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.infra.base_agent import BaseAgent
+    from youtube_autonomous_agents.agents.base import BaseAgent
     from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 logger = logging.getLogger("youtube_agent_planner.dag_executor")

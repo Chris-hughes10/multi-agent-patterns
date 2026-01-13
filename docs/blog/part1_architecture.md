@@ -681,7 +681,7 @@ This is the hub-and-spoke pattern:
   └─────────┘ └──────────┘ └─────────┘ └─────────┘
 ```
 
-Every interaction flows through the center. The orchestrator accumulates context from each step, maintaining the full conversation history.
+Every interaction flows through the centre. The orchestrator accumulates context from each step, maintaining the full conversation history.
 
 ### Context Injection
 
