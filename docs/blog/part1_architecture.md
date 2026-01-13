@@ -431,6 +431,28 @@ This isn't about making code "AI-friendly" at the expense of good design. It's t
 
 As AI coding assistants become more prevalent, architectural discipline becomes even more valuable. The codebases that benefit most from AI assistance are the ones that are already well-structured. The messy codebases stay messy, because the AI amplifies the existing patterns—good or bad.
 
+### A Note on Testing
+
+A natural benefit of the layered architecture is testability. With clear boundaries between layers, testing strategy becomes straightforward.
+
+The principle we follow: **mock at the system boundary, not internally**.
+
+```
+┌─────────────────────────────────────────────┐
+│  agents/  →  tools/  →  services/           │  ← Test with REAL code
+└─────────────────────────────────────────────┘
+                              ↓
+                    ┌─────────────────┐
+                    │ External APIs   │  ← MOCK here
+                    │ - YouTube API   │
+                    │ - Azure OpenAI  │
+                    └─────────────────┘
+```
+
+Don't mock your own services. If you're testing `TranscriptSummarizer`, inject a mock OpenAI client - but let the real service logic execute. If you're testing storage, use a temp directory - but exercise the real file I/O.
+
+This gives higher confidence (real code paths), less brittle tests (fewer mocks to maintain), and catches the integration bugs that slip through pure unit tests.
+
 ---
 
 ## Domain-Driven Organisation
@@ -562,10 +584,16 @@ This separation means we can test each specialist agent independently, with clea
 An agent definition is surprisingly simple. Here's the SearchAgent:
 
 ```python
-SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent.
-Your job is to find relevant YouTube videos based on user queries.
-Use the search_youtube tool to find videos.
-You ONLY search - you do not fetch transcripts or summarize."""
+#agents/search_agent.py
+
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent. Your job is to find relevant YouTube videos based on user queries.
+
+When asked to search:
+1. Use the search_youtube tool to find videos
+2. Return the results clearly formatted
+3. Highlight which videos seem most relevant to the query
+
+You only search - you do not fetch transcripts or summarize. Other agents handle those tasks."""
 
 def create_search_agent() -> ChatAgent:
     """Factory function that creates a Search Agent."""
@@ -578,7 +606,7 @@ def create_search_agent() -> ChatAgent:
 ```
 
 Notice the pattern:
-- **Instructions** are extracted as module-level constants for clarity
+- **Instructions** are extracted as module-level constants for clarity. Alternatively, you could load prompts from external files (e.g., `prompts/search_agent.txt`), which makes iterating on prompts easier without touching Python code
 - **Tools** are functions from the `tools/` layer (which call services)
 - The agent doesn't know about YouTube APIs - it just calls tools
 
@@ -632,19 +660,21 @@ class OrchestratorAgent:
         )
 ```
 
+Notice we use a class here instead of a simple factory function. This is intentional: the orchestrator needs to maintain state—specifically, a cache of lazily-initialized sub-agents. This avoids recreating agents on every delegation while keeping initialization costs deferred until first use.
+
 The orchestrator's "tools" are delegation functions. When the LLM decides to search, it calls `ask_search_agent`, which runs the SearchAgent and returns its result. The orchestrator sees the result and decides what to do next.
 
 This is the hub-and-spoke pattern:
 
 ```
-                         ┌─────────────┐
-                         │ Orchestrator│
-                         │   (LLM)     │
-                         └──────┬──────┘
-                                │
-       ┌────────────┬───────────┼───────────┬────────────┐
-       │            │           │           │            │
-       ▼            ▼           ▼           ▼            ▼
+                   ┌─────────────┐
+                   │ Orchestrator│
+                   │   (LLM)     │
+                   └──────┬──────┘
+                          │
+       ┌────────────┬─────┴─────┬───────────┐
+       │            │           │           │
+       ▼            ▼           ▼           ▼
   ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌─────────┐
   │ Search  │ │Transcript│ │Summarize│ │  Writer │
   │  Agent  │ │  Agent   │ │  Agent  │ │  Agent  │
@@ -680,31 +710,137 @@ class TranscriptContextProvider(ContextProvider):
         return Context(instructions="\n".join(lines))
 ```
 
-The framework calls `invoking()` before each LLM request, and the returned `Context` is merged into the agent's instructions. Now the orchestrator can reason: "The user wants a summary, and I already have the transcript cached, so I'll skip fetching and go straight to SummarizeAgent."
+The framework calls `invoking()` before each LLM request, and the returned `Context` is merged into the agent's instructions.
+
+It's worth noting that this is separate from *conversation memory*—the back-and-forth dialogue history between user and agent. The framework handles conversation memory automatically, typically through a thread or session mechanism. The `messages` parameter passed to `invoking()` already contains this history.
+
+The `ContextProvider` pattern addresses a different need: injecting *domain state* that exists outside the conversation. Our storage layer persists transcripts to disk, but the LLM has no way of knowing what's there unless we tell it. By querying storage and formatting the results as instructions, we bridge the gap between our application's state and the LLM's context window.
+
+This separation is intentional. Conversation memory answers "what have we discussed?", while domain context answers "what resources exist?". The framework manages the former; we're responsible for the latter.
+
+Now the orchestrator can reason: "The user wants a summary, and I already have the transcript cached, so I'll skip fetching and go straight to SummarizeAgent."
 
 ---
 
-## A Note on Testing
+## Seeing It in Action
 
-A natural benefit of the layered architecture is testability. With clear boundaries between layers, testing strategy becomes straightforward.
+Theory is useful, but there's nothing like seeing the system actually run. Let's walk through what happens when we make a real request to the orchestrator.
 
-The principle we follow: **mock at the system boundary, not internally**.
+Here's our test request:
 
 ```
-┌─────────────────────────────────────────────┐
-│  agents/  →  tools/  →  services/           │  ← Test with REAL code
-└─────────────────────────────────────────────┘
-                              ↓
-                    ┌─────────────────┐
-                    │ External APIs   │  ← MOCK here
-                    │ - YouTube API   │
-                    │ - Azure OpenAI  │
-                    └─────────────────┘
+I want to cook a pork loin roast on a Kamado grill/smoker.
+I would like some info on how to do this based on techniques on YouTube.
+Some channels I trust are fork and embers and chuds bbq.
+Ideally, I need to know the temperature, the grill setup, the internal
+temperature and the time.
+Save the results to pork_loin_guide.md
 ```
 
-Don't mock your own services. If you're testing `TranscriptSummarizer`, inject a mock OpenAI client - but let the real service logic execute. If you're testing storage, use a temp directory - but exercise the real file I/O.
+When we run this through the orchestrator with logging enabled, we can observe the full decision-making flow. The logs below are cleaned up for clarity—the actual debug output includes framework internals and full response payloads—but the core flow is preserved:
 
-This gives higher confidence (real code paths), less brittle tests (fewer mocks to maintain), and catches the integration bugs that slip through pure unit tests.
+```
+10:42:15 [INFO] orchestrator: Received request: I want to cook a pork loin...
+10:42:15 [DEBUG] orchestrator: Checking transcript context...
+10:42:15 [DEBUG] context: No transcripts currently stored
+10:42:15 [DEBUG] orchestrator: Calling Azure OpenAI...
+
+10:42:17 [INFO] orchestrator: Delegating to SearchAgent
+10:42:17 [DEBUG] search_agent: Searching YouTube for: pork loin kamado fork embers chuds bbq
+10:42:18 [INFO] youtube_service: Found 5 videos matching query
+10:42:18 [DEBUG] search_agent: Returning formatted results
+
+10:42:19 [INFO] orchestrator: Delegating to TranscriptAgent
+10:42:19 [DEBUG] transcript_agent: Fetching transcript for video fI86yXKlnQA
+10:42:20 [INFO] youtube_service: Fetched transcript (4,521 words)
+10:42:20 [DEBUG] storage_service: Saved transcript to data/transcripts/fI86yXKlnQA.json
+10:42:20 [DEBUG] transcript_agent: Transcript cached and returned
+
+10:42:21 [INFO] orchestrator: Delegating to TranscriptAgent
+10:42:21 [DEBUG] transcript_agent: Fetching transcript for video FsbwQI-EI-k
+10:42:22 [INFO] youtube_service: Fetched transcript (3,892 words)
+10:42:22 [DEBUG] storage_service: Saved transcript to data/transcripts/FsbwQI-EI-k.json
+
+10:42:23 [INFO] orchestrator: Delegating to SummarizeAgent
+10:42:23 [DEBUG] summarize_agent: Summarizing 2 transcripts (8,413 total words)
+10:42:26 [INFO] summarize_service: Generated summary (847 words)
+
+10:42:27 [INFO] orchestrator: Delegating to WriterAgent
+10:42:27 [DEBUG] writer_agent: Writing to output/pork_loin_guide.md
+10:42:27 [INFO] storage_service: File written successfully
+
+10:42:27 [INFO] orchestrator: Request completed (12.4s)
+```
+
+### What's Happening Here
+
+The logs reveal the orchestrator pattern in motion:
+
+1. **Context Check**: The orchestrator first checks for cached transcripts. Finding none, it knows it needs to search and fetch.
+
+2. **SearchAgent Delegation**: The orchestrator decides it needs videos, so it delegates to SearchAgent. Notice the clean boundary—the orchestrator says "find videos about X", not "call the YouTube API with these parameters."
+
+3. **TranscriptAgent Delegation** (×2): For each relevant video, the orchestrator delegates to TranscriptAgent. The agent handles fetching, caching, and formatting—the orchestrator just sees results.
+
+4. **SummarizeAgent Delegation**: With transcripts in hand, the orchestrator passes the text to SummarizeAgent. The summarizer doesn't know about YouTube—it just receives text and produces a summary.
+
+5. **WriterAgent Delegation**: Finally, the orchestrator asks WriterAgent to save the result. Again, clean delegation—the orchestrator provides content and a filename, the agent handles the rest.
+
+### The Output
+
+The final markdown file demonstrates what we get from this orchestration:
+
+```markdown
+# Pork Loin Roast on a Kamado (YouTube-Technique Guide)
+
+**Date:** 2025-01-11
+**Source:** YouTube technique summaries (videos linked below)
+
+## Key targets (temps & doneness)
+
+- **Pit / dome temp (indirect smoking):** **250–275°F** (121–135°C)
+- **Internal temp targets (pork loin):**
+  - **Pull at 140–145°F** (60–63°C) for juicy slices
+  - If you prefer more done: **150°F** (66°C)
+- **Rest:** **10–20 minutes** (loosely tented)
+
+## Recommended kamado setups
+
+### Setup A — Indirect "smoke-then-finish" (most consistent)
+1. **Charcoal:** quality lump; add 1–3 chunks of mild fruit wood
+2. **Heat deflectors:** installed for indirect cooking
+3. **Target pit temp:** stabilize at **250–275°F**
+
+...
+
+## Video references
+- **Fork & Embers** — Pork loin roast method
+- **Chuds BBQ** — Temp-control + finishing approach
+```
+
+The orchestrator synthesised information from multiple YouTube videos into a coherent, actionable reference document. Each agent contributed its specialty: SearchAgent found the right videos, TranscriptAgent retrieved the content, SummarizeAgent extracted the key information, and WriterAgent saved the result.
+
+### Iterative Refinement
+
+Because the orchestrator maintains conversation history, we can continue the dialogue to refine results:
+
+```
+User: Can you add a section comparing direct vs indirect cooking methods?
+User: The temperatures seem low - can you check if Chuds mentions a hotter approach?
+User: Save a version without the glaze instructions for my friend who doesn't like sweet.
+```
+
+Each follow-up leverages the cached transcripts—no need to re-fetch from YouTube. The orchestrator remembers what it has, reasons about what's needed, and delegates accordingly. This conversational loop is where the agent pattern really shines: the system adapts to feedback without starting from scratch.
+
+### What We Don't See (And Why That Matters)
+
+Just as important as what appears in the logs is what *doesn't*:
+
+- **No YouTube API details** in the orchestrator logs—that's encapsulated in the service layer
+- **No OpenAI prompt engineering** visible at the orchestration level—that's in the agent instructions
+- **No file I/O logic** leaking up—WriterAgent handles it internally
+
+Each layer handles its own concerns. The orchestrator reasons about *what* needs to happen; the agents and services handle *how*.
 
 ---
 
@@ -726,7 +862,7 @@ These principles apply regardless of which agent framework you choose:
 
 All patterns described here are implemented in the reference codebase:
 
-- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
+- **[Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
 - **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
 
@@ -736,15 +872,13 @@ The code is meant to be read and learned from, not just used. Star the repo if y
 
 ## Conclusion
 
-The question I started with was: can you build a multi-agent system that doesn't become an unmaintainable mess?
+The ambition I started with was to demonstrate that agentic systems can be architected with the same discipline we apply to any serious software project. The orchestrator pattern we've explored here shows that's achievable.
 
-The answer is yes - and the approach isn't novel. It's applying the same principles we've used for decades in software engineering: layered architecture, separation of concerns, Domain-Driven Design, clear boundaries between components.
+The approach isn't novel—layered architecture, separation of concerns, Domain-Driven Design. What's interesting is how naturally these patterns map to agent systems. The Anti-Corruption Layer concept perfectly describes the tools/services split. Bounded contexts explain why YouTube search and transcript fetching belong together.
 
-What's interesting is that these patterns map so naturally to agent systems. The DDD layers emerge organically. The Anti-Corruption Layer concept perfectly describes the tools/services split. Bounded contexts explain why we group YouTube search and transcript fetching together.
+The key insight specific to agents: **tools and services have fundamentally different responsibilities**. Tools translate between the LLM's world (simple parameters, string outputs) and your domain's world (rich objects, business logic). Separating them unlocks clean, testable systems.
 
-Agent systems aren't magic. They're software systems with a particular interface (natural language) and a particular component (an LLM). The same engineering discipline applies.
-
-The key insight specific to agents: **tools and services have fundamentally different responsibilities**. Tools are an adapter layer - translating between the LLM's world (simple parameters, string outputs) and your domain's world (rich objects, business logic). Conflating them creates the mess I see in most agent code. Separating them unlocks clean, testable, maintainable systems.
+Agent systems aren't magic. They're software systems with a natural language interface and an LLM component. The engineering discipline we've refined over decades still applies—you just need to think about where the boundaries are.
 
 ---
 
