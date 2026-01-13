@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import extract_video_id, fetch_transcript
-from youtube_agent_orchestrator.tools.transcript import (
+from youtube_agent_orchestrator.tools.youtube import (
     fetch_video_transcript,
     list_stored_transcripts,
     lookup_stored_transcript,

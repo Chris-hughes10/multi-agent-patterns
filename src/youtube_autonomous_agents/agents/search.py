@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from youtube_autonomous_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.youtube import search_youtube
-from youtube_agent_orchestrator.tools.search import search_youtube_structured
+from youtube_agent_orchestrator.tools.youtube import search_youtube_structured
 from youtube_autonomous_agents.agents.base import BaseAgent
 from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
 from youtube_autonomous_agents.models.task import Task, TaskResult, TaskStatus

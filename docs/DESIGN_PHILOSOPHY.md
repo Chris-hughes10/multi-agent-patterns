@@ -86,7 +86,7 @@ Tools are **thin wrappers** that make services callable by an LLM. They:
 - Are stateless
 
 ```python
-# tools/search.py
+# tools/youtube.py
 def search_youtube_formatted(query: str, max_results: int = 5) -> str:
     """What the LLM calls."""
     results = search_youtube(query, max_results)  # calls service
@@ -119,7 +119,7 @@ class YouTubeTranscriptFetcher:
 ```
 LLM decides to call "fetch_video_transcript"
     ↓
-tools/transcript.py::fetch_video_transcript(video_id)
+tools/youtube.py::fetch_video_transcript(video_id)
     ↓
 services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
     ↓

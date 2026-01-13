@@ -25,12 +25,12 @@ from youtube_transcript_api.proxies import GenericProxyConfig
 
 from youtube_agent_orchestrator.infra import fetch_html
 from youtube_agent_orchestrator.models.config import get_settings
-from youtube_agent_orchestrator.models.search import VideoSearchResult
-from youtube_agent_orchestrator.models.transcript import (
+from youtube_agent_orchestrator.models.youtube import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
+    VideoSearchResult,
 )
 
 # =============================================================================

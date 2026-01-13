@@ -8,7 +8,7 @@ from azure.identity import AzureCliCredential, get_bearer_token_provider
 from openai import AsyncAzureOpenAI
 
 from youtube_agent_orchestrator.models.config import Settings, get_settings
-from youtube_agent_orchestrator.models.transcript import TranscriptResult
+from youtube_agent_orchestrator.models.youtube import TranscriptResult
 
 
 class SummarizationError(Exception):

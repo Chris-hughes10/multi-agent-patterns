@@ -364,7 +364,7 @@ async def write_markdown_file(
 | YouTube search | `services/youtube.py` | Native async | `httpx.AsyncClient` |
 | Transcript fetching | `services/youtube.py` | Thread wrapper | `asyncio.to_thread()` |
 | LLM summarization | `services/summarizer.py` | Native async | `AsyncAzureOpenAI` |
-| Storage operations | `tools/transcript.py` | Thread wrapper | `asyncio.to_thread(storage.load)` |
+| Storage operations | `tools/youtube.py` | Thread wrapper | `asyncio.to_thread(storage.load)` |
 | Markdown writing | `tools/writer.py` | Thread wrapper | `asyncio.to_thread()` |
 | Orchestrator tools | `agents/orchestrator.py` | Native async | `async def` + `await agent.run()` |
 

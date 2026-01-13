@@ -11,12 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from youtube_agent_orchestrator.models.search import VideoSearchResult
-from youtube_agent_orchestrator.models.transcript import (
+from youtube_agent_orchestrator.models.youtube import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
+    VideoSearchResult,
 )
 from youtube_autonomous_agents.agents import (
     SearchAgent,

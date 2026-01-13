@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from youtube_agent_orchestrator.models.transcript import (
+from youtube_agent_orchestrator.models.youtube import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,

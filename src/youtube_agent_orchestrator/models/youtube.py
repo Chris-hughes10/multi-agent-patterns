@@ -1,6 +1,39 @@
-"""Data models for YouTube transcripts."""
+"""YouTube domain models - search results and transcripts.
+
+This module consolidates all YouTube-related data models following DDD principles.
+Search and transcript models share the YouTube bounded context.
+"""
+
+from dataclasses import dataclass
 
 from pydantic import BaseModel
+
+
+# =============================================================================
+# Search Models
+# =============================================================================
+
+
+@dataclass
+class VideoSearchResult:
+    """Result from a YouTube video search."""
+
+    video_id: str
+    title: str
+    channel: str
+    duration: str
+    view_count: str | None
+    published_time: str | None
+
+    @property
+    def url(self) -> str:
+        """Get the full YouTube URL for this video."""
+        return f"https://www.youtube.com/watch?v={self.video_id}"
+
+
+# =============================================================================
+# Transcript Models
+# =============================================================================
 
 
 class TranscriptSegment(BaseModel):

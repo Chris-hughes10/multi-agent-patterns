@@ -1,40 +1,126 @@
-"""Transcript tools - LLM-callable wrappers.
+"""YouTube tools - LLM-callable wrappers for YouTube operations.
 
-This module contains tool functions for transcript operations.
-Business logic is in services/youtube.py and services/storage.py.
+This module consolidates all YouTube-related tool functions following DDD principles.
+Search and transcript tools share the YouTube bounded context.
 
 All tool functions are async to avoid blocking the event loop.
 """
 
 import asyncio
+import json
 import logging
 from typing import Annotated
 
 from pydantic import Field
 
 from youtube_agent_orchestrator.models.config import get_runtime_config
+from youtube_agent_orchestrator.models.youtube import VideoSearchResult
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import (
     TranscriptFetcher,
     TranscriptFetchError,
+    YouTubeSearchError,
     YouTubeTranscriptFetcher,
     extract_video_id,
     fetch_transcript,
+    search_youtube,
 )
 
+logger = logging.getLogger("youtube_agent.tools.youtube")
+
 __all__ = [
+    # Search tools
+    "search_youtube_formatted",
+    "search_youtube_structured",
+    # Transcript tools
+    "fetch_video_transcript",
+    "store_video_transcript",
+    "lookup_stored_transcript",
+    "list_stored_transcripts",
+    # Re-exports from service/model for convenience
+    "VideoSearchResult",
+    "YouTubeSearchError",
     "TranscriptFetchError",
     "TranscriptFetcher",
     "YouTubeTranscriptFetcher",
     "extract_video_id",
     "fetch_transcript",
-    "fetch_video_transcript",
-    "store_video_transcript",
-    "lookup_stored_transcript",
-    "list_stored_transcripts",
 ]
 
-logger = logging.getLogger("youtube_agent.tools.transcript")
+
+# =============================================================================
+# Search Tools
+# =============================================================================
+
+
+async def search_youtube_formatted(
+    query: Annotated[str, Field(description="Search query for YouTube videos")],
+    max_results: Annotated[int, Field(description="Maximum number of results to return")] = 5,
+) -> str:
+    """Search YouTube and return formatted string results.
+
+    This is the agent-friendly async version that returns a formatted string
+    suitable for LLM consumption.
+
+    :param query: Search query string
+    :param max_results: Maximum number of results (default 5)
+    :return: Formatted string with search results
+    """
+    results = await search_youtube(query, max_results)
+
+    if not results:
+        return f"No videos found for query: {query}"
+
+    lines = [f"Found {len(results)} videos for '{query}':\n"]
+    for i, video in enumerate(results, 1):
+        lines.append(f"{i}. {video.title}")
+        lines.append(f"   Channel: {video.channel}")
+        lines.append(f"   Duration: {video.duration}")
+        lines.append(f"   Video ID: {video.video_id}")
+        if video.view_count:
+            lines.append(f"   Views: {video.view_count}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+async def search_youtube_structured(
+    query: Annotated[str, Field(description="Search query for YouTube videos")],
+    max_results: Annotated[int, Field(description="Maximum number of results to return")] = 5,
+) -> str:
+    """Search YouTube and return structured JSON results.
+
+    Returns a JSON string with structured data that can be used for
+    DAG variable resolution (e.g., $search.results[0].video_id).
+
+    :param query: Search query string
+    :param max_results: Maximum number of results (default 5)
+    :return: JSON string with query and results array
+    """
+    results = await search_youtube(query, max_results)
+
+    output = {
+        "query": query,
+        "count": len(results),
+        "results": [
+            {
+                "video_id": video.video_id,
+                "title": video.title,
+                "channel": video.channel,
+                "duration": video.duration,
+                "view_count": video.view_count,
+                "published_time": video.published_time,
+            }
+            for video in results
+        ],
+    }
+
+    return json.dumps(output, indent=2)
+
+
+# =============================================================================
+# Transcript Tools
+# =============================================================================
 
 
 async def fetch_video_transcript(

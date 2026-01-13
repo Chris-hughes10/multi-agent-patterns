@@ -3,7 +3,7 @@
 from agent_framework import ChatAgent
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
-from youtube_agent_orchestrator.tools.transcript import (
+from youtube_agent_orchestrator.tools.youtube import (
     fetch_video_transcript,
     list_stored_transcripts,
     lookup_stored_transcript,

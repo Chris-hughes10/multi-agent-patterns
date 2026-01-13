@@ -15,10 +15,10 @@ from youtube_agent_orchestrator.agents.orchestrator import (
     create_orchestrator,
 )
 from youtube_agent_orchestrator.models.storage import StoredTranscript
-from youtube_agent_orchestrator.models.transcript import TranscriptResult
+from youtube_agent_orchestrator.models.youtube import TranscriptResult
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import fetch_transcript
-from youtube_agent_orchestrator.tools.search import search_youtube_formatted
+from youtube_agent_orchestrator.tools.youtube import search_youtube_formatted
 from youtube_agent_orchestrator.tools.summarize import summarize_video
 
 logger = logging.getLogger("youtube_agent_orchestrator.driver")

@@ -9,7 +9,7 @@ from youtube_agent_orchestrator.agents.summarize_agent import create_summarize_a
 from youtube_agent_orchestrator.agents.transcript_agent import create_transcript_agent
 from youtube_agent_orchestrator.agents.writer_agent import create_writer_agent
 from youtube_agent_orchestrator.tools.summarize import summarize_stored_transcript, summarize_text
-from youtube_agent_orchestrator.tools.transcript import (
+from youtube_agent_orchestrator.tools.youtube import (
     fetch_video_transcript,
     list_stored_transcripts,
     lookup_stored_transcript,
@@ -60,7 +60,7 @@ class TestWriterAgent:
 class TestTranscriptTools:
     """Tests for transcript tool functions (async)."""
 
-    @patch("youtube_agent_orchestrator.tools.transcript.TranscriptStorage")
+    @patch("youtube_agent_orchestrator.tools.youtube.TranscriptStorage")
     async def test_list_stored_transcripts_returns_message_when_empty(
         self, mock_storage_class: MagicMock
     ) -> None:
@@ -71,7 +71,7 @@ class TestTranscriptTools:
         result = await list_stored_transcripts()
         assert "No transcripts" in result
 
-    @patch("youtube_agent_orchestrator.tools.transcript.TranscriptStorage")
+    @patch("youtube_agent_orchestrator.tools.youtube.TranscriptStorage")
     async def test_lookup_stored_transcript_returns_error_for_missing(
         self, mock_storage_class: MagicMock
     ) -> None:
@@ -82,9 +82,9 @@ class TestTranscriptTools:
         result = await lookup_stored_transcript("nonexistent123")
         assert "no stored transcript" in result.lower()
 
-    @patch("youtube_agent_orchestrator.tools.transcript.get_runtime_config")
-    @patch("youtube_agent_orchestrator.tools.transcript.TranscriptStorage")
-    @patch("youtube_agent_orchestrator.tools.transcript.fetch_transcript", new_callable=AsyncMock)
+    @patch("youtube_agent_orchestrator.tools.youtube.get_runtime_config")
+    @patch("youtube_agent_orchestrator.tools.youtube.TranscriptStorage")
+    @patch("youtube_agent_orchestrator.tools.youtube.fetch_transcript", new_callable=AsyncMock)
     async def test_fetch_video_transcript_returns_formatted_output(
         self, mock_fetch: AsyncMock, mock_storage_class: MagicMock, mock_config: MagicMock
     ) -> None:
@@ -104,8 +104,8 @@ class TestTranscriptTools:
         assert "Test Video" in result
         assert "transcript text" in result
 
-    @patch("youtube_agent_orchestrator.tools.transcript.TranscriptStorage")
-    @patch("youtube_agent_orchestrator.tools.transcript.fetch_transcript")
+    @patch("youtube_agent_orchestrator.tools.youtube.TranscriptStorage")
+    @patch("youtube_agent_orchestrator.tools.youtube.fetch_transcript")
     async def test_fetch_video_transcript_handles_errors(
         self, mock_fetch: MagicMock, mock_storage_class: MagicMock
     ) -> None:
@@ -117,7 +117,7 @@ class TestTranscriptTools:
         result = await fetch_video_transcript("dQw4w9WgXcQ")
         assert "Error" in result
 
-    @patch("youtube_agent_orchestrator.tools.transcript.TranscriptStorage")
+    @patch("youtube_agent_orchestrator.tools.youtube.TranscriptStorage")
     async def test_fetch_video_transcript_uses_cache(self, mock_storage_class: MagicMock) -> None:
         """Should return cached transcript without calling YouTube API."""
         mock_storage = MagicMock()

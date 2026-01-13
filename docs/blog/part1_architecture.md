@@ -134,7 +134,7 @@ Tools are thin wrappers that translate between LLM and application. They:
 - Are stateless
 
 ```python
-# tools/transcript.py
+# tools/youtube.py
 
 async def fetch_video_transcript(
     video_id: Annotated[str, Field(description="YouTube video ID")]
@@ -208,7 +208,7 @@ When the LLM decides to fetch a transcript:
 ```
 LLM decides to call "fetch_video_transcript"
     ↓
-tools/transcript.py::fetch_video_transcript(video_id)
+tools/youtube.py::fetch_video_transcript(video_id)
     ↓
 services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
     ↓
@@ -345,7 +345,7 @@ def create_search_agent() -> ChatAgent:
     )
 
 
-# tools/search.py - Tool layer (thin LLM adapter)
+# tools/youtube.py - Tool layer (thin LLM adapter)
 async def search_youtube_formatted(query: str) -> str:
     """Search YouTube for videos matching the query."""
     results = await search_youtube(query)  # Calls service
@@ -360,7 +360,7 @@ async def search_youtube(query: str) -> list[VideoResult]:
     return parse_video_results(html)
 
 
-# models/search.py - Model layer (domain objects)
+# models/youtube.py - Model layer (domain objects)
 @dataclass
 class VideoResult:
     video_id: str
@@ -409,8 +409,8 @@ By the time you realize you need better architecture, refactoring is painful. I'
 
 ### Architecture in the Age of AI Coding Assistants
 There's another dimension to this that's become increasingly relevant: well-architected code works better with AI coding assistants.
-A
-s tools like GitHub Copilot, Cursor, and Claude Code become standard parts of development workflows, I've noticed something interesting: they're much more effective when working with clearly structured code than with greenfield or tangled codebases; especially when paired with a documentation to provide context.
+
+As tools like GitHub Copilot, Cursor, and Claude Code become standard parts of development workflows, I've noticed something interesting: they're much more effective when working with clearly structured code than with greenfield or tangled codebases; especially when paired with a documentation to provide context.
 
 When I ask Claude Code to "implement a feature to filter search results by minimum duration," it knows exactly where to look: `services/youtube.py`. The service has clear boundaries, typed interfaces, and follows consistent patterns. The AI can reason about the change without needing to understand the entire system.
 
@@ -435,11 +435,11 @@ As AI coding assistants become more prevalent, architectural discipline becomes 
 
 ## Domain-Driven Organisation
 
-With the tools/services split established, the next question is: how should we organise the `services/` package - our Domain Layer?
+With our layer structure established, the next question is: how should we organise code *within* each layer? Let's look at the `services/` package as an example—the same thinking process applies throughout, though different layers may arrive at different answers.
 
-This is where another DDD concept becomes directly applicable: **Bounded Contexts**.
+This is where a DDD concept becomes directly applicable: **Bounded Contexts**.
 
-We had two options:
+I considered the following options:
 
 **Option A: By Function**
 ```
@@ -458,7 +458,7 @@ services/
 └── storage.py          # Persistence
 ```
 
-We chose Option B. Here's why.
+I chose Option B. Here's why.
 
 ### Bounded Contexts
 
@@ -475,13 +475,12 @@ Both search and transcript fetching operate within this context. They share:
 
 Grouping them together provides:
 
-**Cohesion** - Related code stays together. When debugging transcript issues, you don't need to check multiple files.
+- **Cohesion** - Related code stays together. When debugging transcript issues, you don't need to check multiple files.
 
-**Replaceability** - Want to add Vimeo support? Create `services/vimeo.py` with the same interface. The rest of the system doesn't change.
+- **Replaceability** - Want to add Vimeo support? Create `services/vimeo.py` with the same interface. The rest of the system doesn't change.
 
-**Discoverability** - "Where's YouTube logic?" → `services/youtube.py`. Simple.
-
-**AI Comprehension** - Consistent domain language means AI assistants share your vocabulary. When everything YouTube-related uses "video_id" and "channel", the AI can reason about changes without confusion.
+- **Discoverability** - "Where's YouTube logic?" → `services/youtube.py`. Simple.
+- **AI Comprehension** - Consistent domain language means AI assistants share your vocabulary. When everything YouTube-related uses "video_id" and "channel", the AI can reason about changes without confusion.
 
 ### The Litmus Test
 
@@ -494,6 +493,10 @@ When deciding where code belongs, ask: "If I replaced this external system, what
 | Replace Azure OpenAI with Anthropic | `services/summarizer.py` |
 
 Each domain boundary represents a potential replacement point. If multiple files would need to change for a single external system swap, your boundaries might be wrong.
+
+We apply this bounded context principle to our domain and anti-corruption layers. The `services/`, `tools/`, and `models/` packages each have a `youtube.py` file that groups YouTube-related functionality. This consistency makes navigation predictable: "Where's YouTube logic?" → check `youtube.py` in any of these layers.
+
+This has a secondary benefit for AI-assisted development: **discoverability**. When an LLM needs to understand or modify YouTube-related code, consistent naming means it can find the right files without guessing. And larger, cohesive modules aren't a bad thing—the model can read one file and have full context, rather than piecing together information scattered across many small files.
 
 ---
 
@@ -518,6 +521,18 @@ The answer is predictability and debuggability. When something goes wrong:
 - If search results are irrelevant, check SearchAgent
 
 Mixed responsibilities make debugging harder. "Is it a search problem or a transcript problem?" becomes a common question when agents do multiple things.
+
+### Why Not a YouTubeAgent?
+
+You might notice an apparent inconsistency. We just argued for organizing `services/`, `tools/`, and `models/` by bounded context—each has a `youtube.py` file. So why don't we have a YouTubeAgent that handles both search and transcripts?
+
+The answer lies in what each layer does:
+
+- **Domain layers** (services, models) and the **anti-corruption layer** (tools) are organized by *external system*. These layers contain domain concepts like "video_id" and "channel", and grouping by bounded context makes the system easier to understand and replace.
+
+- **Agents** are an *orchestration layer*—they define jobs and coordinate work. An agent is more like a role than a system boundary. SearchAgent's job is finding videos. TranscriptAgent's job is fetching transcripts. These are different jobs that happen to use the same external system.
+
+We don't call SummarizeAgent "AzureOpenAIAgent" even though it uses Azure OpenAI. The agent's identity comes from what it *does*, not what system it *uses*. This keeps debugging simple: one job, one agent, one place to look when things go wrong.
 
 ### The Orchestrator Pattern
 
@@ -622,44 +637,50 @@ The orchestrator's "tools" are delegation functions. When the LLM decides to sea
 This is the hub-and-spoke pattern:
 
 ```
-                    ┌─────────────┐
-                    │ Orchestrator│
-                    │   (LLM)     │
-                    └──────┬──────┘
-                           │
-         ┌─────────────────┼─────────────────┐
-         │                 │                 │
-         ▼                 ▼                 ▼
-    ┌─────────┐      ┌─────────┐      ┌─────────┐
-    │ Search  │      │Transcript│     │Summarize│
-    │  Agent  │      │  Agent  │      │  Agent  │
-    └─────────┘      └─────────┘      └─────────┘
+                         ┌─────────────┐
+                         │ Orchestrator│
+                         │   (LLM)     │
+                         └──────┬──────┘
+                                │
+       ┌────────────┬───────────┼───────────┬────────────┐
+       │            │           │           │            │
+       ▼            ▼           ▼           ▼            ▼
+  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌─────────┐
+  │ Search  │ │Transcript│ │Summarize│ │  Writer │
+  │  Agent  │ │  Agent   │ │  Agent  │ │  Agent  │
+  └─────────┘ └──────────┘ └─────────┘ └─────────┘
 ```
 
 Every interaction flows through the center. The orchestrator accumulates context from each step, maintaining the full conversation history.
 
 ### Context Injection
 
-One subtle but important pattern: the orchestrator needs to know what transcripts are already cached to make smart decisions. We use a `TranscriptContextProvider` that injects this information before each LLM call:
+One subtle but important pattern: the orchestrator needs to know what transcripts are already cached to make smart decisions. The Microsoft Agent Framework provides a `ContextProvider` base class for this—we implement `invoking()` to inject context before each LLM call:
 
 ```python
-class TranscriptContextProvider:
+from agent_framework._memory import Context, ContextProvider
+
+class TranscriptContextProvider(ContextProvider):
     """Provides context about stored transcripts to the orchestrator."""
 
-    def get_context(self) -> str:
-        stored = self.storage.list_transcripts()
-        if not stored:
-            return "No transcripts currently stored."
+    async def invoking(self, messages, **kwargs) -> Context:
+        """Called before each LLM invocation."""
+        video_ids = self._storage.list_videos()
+
+        if not video_ids:
+            return Context(instructions="No transcripts currently stored.")
 
         lines = ["You have these transcripts available:"]
-        for t in stored:
-            status = "summarized" if t.has_summary else "not summarized"
-            lines.append(f"- {t.title} ({t.video_id}): {status}")
+        for vid in video_ids:
+            stored = self._storage.load(vid)
+            if stored:
+                status = "summarized" if stored.summary else "not summarized"
+                lines.append(f"- {stored.metadata.title} ({vid}): {status}")
 
-        return "\n".join(lines)
+        return Context(instructions="\n".join(lines))
 ```
 
-Now the orchestrator can reason: "The user wants a summary, and I already have the transcript cached, so I'll skip fetching and go straight to SummarizeAgent."
+The framework calls `invoking()` before each LLM request, and the returned `Context` is merged into the agent's instructions. Now the orchestrator can reason: "The user wants a summary, and I already have the transcript cached, so I'll skip fetching and go straight to SummarizeAgent."
 
 ---
 

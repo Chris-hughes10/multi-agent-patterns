@@ -2,7 +2,7 @@
 
 import pytest
 
-from youtube_agent_orchestrator.tools.transcript import TranscriptFetchError, fetch_transcript
+from youtube_agent_orchestrator.tools.youtube import TranscriptFetchError, fetch_transcript
 
 
 @pytest.mark.integration

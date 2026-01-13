@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from youtube_agent_orchestrator.models.transcript import Transcript, VideoMetadata
+from youtube_agent_orchestrator.models.youtube import Transcript, VideoMetadata
 
 
 class StoredTranscript(BaseModel):

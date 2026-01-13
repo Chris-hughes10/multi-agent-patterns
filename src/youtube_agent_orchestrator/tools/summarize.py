@@ -13,7 +13,7 @@ from typing import Annotated
 from pydantic import Field
 
 from youtube_agent_orchestrator.models.storage import StoredTranscript
-from youtube_agent_orchestrator.models.transcript import TranscriptResult
+from youtube_agent_orchestrator.models.youtube import TranscriptResult
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.summarizer import SummarizationError, TranscriptSummarizer
 
