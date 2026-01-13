@@ -28,9 +28,9 @@ This isn't necessarily *better* than orchestration - it's a different set of tra
 
 ---
 
-## Understanding the Orchestrator Pattern
+## Recap: The Orchestrator Pattern
 
-Before exploring alternatives, it's worth understanding why the orchestrator pattern is so common - and where its tradeoffs lie.
+In [Part 1](part1_architecture.md), we built a YouTube research assistant using the orchestrator pattern - a central coordinator delegating to specialized agents. Before exploring alternatives, let's revisit why this pattern is so common and where its tradeoffs lie.
 
 Consider a multi-step research task: "Find videos about Kamado cooking, get their transcripts, summarize the key temperatures and times, and save to a markdown file."
 
@@ -54,7 +54,16 @@ But the pattern has characteristics worth noting:
 - **Sequential by default**: Parallelism requires explicit orchestrator logic
 - **Central coupling**: Adding new agents means updating the orchestrator
 
-TODO context bloat?
+### The Hidden Costs
+
+**Context accumulation.** Every sub-agent's response flows back to the orchestrator before the next step. For a 4-step workflow, the orchestrator's context window contains the full history of all previous steps. This means:
+- Token costs grow with chain length (you pay for all previous results in every subsequent call)
+- Long contexts can degrade response quality as the model has more to attend to
+- You eventually hit context window limits on complex workflows
+
+**LLM call multiplication.** When the orchestrator delegates to a sub-agent like SearchAgent, that agent is itself a ChatAgent with tools. Each tool call in an agentic loop requires an LLM round-trip. In our reference implementation, a simple "search → transcript → summarize → write" workflow generates around **7 LLM calls** - efficient because the sub-agents typically complete in one or two turns each. However, this number can grow if agents need multiple tool calls or retries.
+
+These aren't reasons to avoid orchestration - for conversational interfaces, context accumulation is a feature, not a bug. But they're worth understanding as you choose patterns.
 
 I explored several alternative patterns:
 - **Dispatcher pattern**: A router that assigns tasks but doesn't coordinate results
@@ -244,6 +253,28 @@ This is the cost of distributed intelligence. When you move decision-making from
 **Adaptive workflows**: Agents respond to what they find. If search returns no results, the SearchAgent can hand off with "Try a different query" rather than blindly continuing.
 
 **Easy extensibility**: Adding a new agent doesn't require updating a central orchestrator. If the new agent can handle certain intents, it will be routed tasks naturally.
+
+### How This Differs from Framework Handoffs
+
+If you're familiar with [Microsoft's Agent Framework](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/handoff), you might notice similarities - agents transfer control to each other without a central orchestrator. But the patterns differ in meaningful ways:
+
+**Microsoft's Handoff Pattern:**
+- Handoff paths are **declared upfront** (`.add_handoff(triage, [technical, billing])`)
+- Agents trigger handoffs via **explicit tool calls** (`handoff_to_billing_agent()`)
+- Agents route based on the **current message** ("Is this a billing question?")
+- Full conversation history is passed to the receiving agent
+
+**Our Goal-Aware Pattern:**
+- Routing happens **dynamically at runtime** via LLM-based intent analysis
+- Agents return **structured results** (`HandoffResult.handoff(intent=...)`) rather than calling tools
+- Every agent reasons about the **original user goal** ("Is the goal satisfied?")
+- Accumulated state (not full history) flows forward through the chain
+
+The key philosophical difference: Microsoft's handoff is a **smart router** - it decides *who* should handle something. Our pattern adds *why* - each agent understands the end goal and can reason about whether continuing the chain is necessary.
+
+This matters for adaptive workflows. When SearchAgent finds no relevant videos, it doesn't blindly hand off to TranscriptAgent. It reasons: "The goal was to summarize cooking techniques, but I found nothing useful. I should hand off with 'Try alternative search terms' rather than 'Fetch transcripts for these videos'."
+
+Both patterns avoid central orchestration. The choice depends on whether you need declarative routing (predictable, auditable paths) or emergent routing (adaptive, goal-aware decisions).
 
 ---
 

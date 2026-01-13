@@ -369,19 +369,19 @@ While our reference implementation doesn't implement model tier selection (all a
 
 | Pattern | LLM Calls* | Why |
 |---------|-----------|-----|
-| **V1 Orchestrator** | 37 | Nested agents: orchestrator delegates to sub-agents, each running its own agentic loop |
-| **V2 Autonomous** | 16 | Flat agents with routing + goal reasoning at each step |
-| **V3 Planner+DAG** | 4 | Single planning call, then mechanical execution via direct service calls |
+| **V1 Orchestrator** | ~7 | Efficient hub-and-spoke: orchestrator + sub-agents complete quickly |
+| **V2 Autonomous** | ~31 | Most expensive: routing + goal reasoning at every step |
+| **V3 Planner+DAG** | ~8 | Single planning call, then mechanical execution via direct service calls |
 
-*Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation.*
+*Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation. Actual numbers vary based on workflow complexity and model behavior.*
 
-The difference is dramatic: **V3 uses 9x fewer LLM calls than V1** and 4x fewer than V2.
+The surprise here: **V1 and V3 are comparably efficient**, while V2 is significantly more expensive.
 
-Why is V1 so expensive? The orchestrator pattern uses hierarchical agents—the orchestrator delegates to sub-agents like SearchAgent and TranscriptAgent, but each sub-agent is itself a ChatAgent with tools. Every tool call in an agentic loop requires an LLM round-trip. When you have agents calling agents, those costs multiply.
+Why is V2 so expensive? The autonomous pattern adds two LLM calls at every handoff: routing (which agent handles this intent?) and goal reasoning (is the user's goal satisfied?). These extra reasoning steps enable adaptability but multiply costs. A 4-step workflow becomes 8+ decision points.
 
-V3 eliminates this overhead entirely. The planner makes one LLM call to create the execution DAG, then steps execute by calling services directly—no per-step reasoning, no nested agent loops.
+V1 is efficient because the orchestrator makes decisions centrally - it doesn't need to reason about routing or goal satisfaction at each sub-agent.
 
-The key insight isn't just raw cost—it's **predictability**. With V3, you know the LLM budget before execution starts.
+V3 matches V1's efficiency through upfront planning: one LLM call creates the full workflow, then execution is mechanical. The key difference from V1 is **predictability** - you know the LLM budget before execution starts, and you can inspect the plan before running it.
 
 ### When to Use Each Pattern
 
