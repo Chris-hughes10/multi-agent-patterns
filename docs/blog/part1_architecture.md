@@ -151,11 +151,10 @@ async def fetch_video_transcript(
 
 Notice what the tool does NOT do:
 - No configuration management
-- No error handling beyond basic formatting
 - No complex return types
 - No business logic
 
-This tool does one thing: call the service and format the result. No API calls, no error handling, no business logic. Just adaptation.
+This tool does one thing: call the service and format the result. Just adaptation.
 
 ### Services = Business Logic
 
@@ -325,7 +324,7 @@ The tools/services split is one boundary. But a complete agent system needs more
 Here's what this looks like in practice:
 
 ```python
-# presentation/cli.py - Presentation layer (user interface whether)
+# presentation/cli.py - Presentation layer
 @click.command()
 def search(query: str):
     """Search for videos on YouTube."""
@@ -737,6 +736,8 @@ temperature and the time.
 Save the results to pork_loin_guide.md
 ```
 
+This request exercises the full pipeline: search, transcript fetching, summarization, and file writing. It's specific enough to be reproducible but open-ended enough to allow the orchestrator flexibility in execution strategy.
+
 When we run this through the orchestrator with logging enabled, we can observe the full decision-making flow. The logs below are cleaned up for clarity—the actual debug output includes framework internals and full response payloads—but the core flow is preserved:
 
 ```
@@ -842,6 +843,64 @@ Just as important as what appears in the logs is what *doesn't*:
 
 Each layer handles its own concerns. The orchestrator reasons about *what* needs to happen; the agents and services handle *how*.
 
+### The Cost of Flexibility
+
+There's an important trade-off with the orchestrator pattern that only becomes visible when you run it multiple times: **variance**.
+
+The clean sequential flow shown above represents one possible execution. But run the same request again, and you might see a different pattern entirely.
+
+When benchmarking the same request across multiple runs, I observed LLM call counts ranging from **17 to 34 calls** for identical inputs. Why such variance? The orchestrator LLM makes different tactical decisions each time:
+
+| Decision Point | Observed Variance |
+|----------------|-------------------|
+| **Search strategy** | 1-3 searches, sequential or parallel |
+| **Summarization** | Sometimes skipped entirely, sometimes per-video |
+| **Delegation phrasing** | Different wording can cause downstream failures |
+
+With verbose logging enabled, we can see these decisions in action:
+
+```
+# Run A (17 calls) - Minimal approach
+SearchAgent called with: Kamado pork loin Fork and Embers
+SearchAgent called with: Chuds BBQ pork loin kamado
+TranscriptAgent called with: Fetch transcript for video FsbwQI-EI-k...
+TranscriptAgent called with: Fetch transcript for video 2AF1ysZ8eEA...
+TranscriptAgent called with: Fetch transcript for video fI86yXKlnQA...
+WriterAgent called with: Write a markdown file...  # Skipped summarization!
+
+# Run B (25 calls) - Thorough approach
+SearchAgent called with: Find YouTube videos where Fork and Embers...
+SearchAgent called with: Find YouTube videos where Chuds BBQ...
+SearchAgent called with: Find top YouTube videos about cooking pork loin...
+TranscriptAgent called with: ...
+SummarizeAgent called with: From the provided transcripts, extract...
+WriterAgent called with: ...
+```
+
+Run A decided the WriterAgent could synthesize directly from transcripts. Run B added a summarization step. Both produced valid outputs, but with different costs and potentially different quality.
+
+
+#### "Just Set Temperature to Zero?"
+
+A natural reaction to this variance is to reduce LLM temperature for more deterministic behaviour. I tested this:
+
+| Temperature | Range | Std Dev |
+|-------------|-------|---------|
+| 0.7 (default) | 17-34 | ~5.6 |
+| 0.0 (deterministic) | 25-35 | 5.29 |
+
+*Note: A fixed seed (42) was set for all runs.*
+
+Even with temperature=0 and a fixed seed, we observed **10 calls of variance** (25 to 35 calls). The unpredictability isn't primarily from sampling randomness—it's from the LLM making different *valid* strategic choices each run:
+
+- How many parallel searches to issue (1, 2, or 3)
+- Whether to summarize per-video or combined
+- Whether to skip summarization entirely and let the writer synthesize
+
+This variance is architectural. To reduce this, we either need to constrain each agent's scope so tightly that decisions become more consistent, or remove runtime decision-making entirely by planning upfront; alternatives will be explored in future posts.
+
+This isn't a bug—it's the inherent nature of letting an LLM decide the workflow at runtime. The orchestrator has flexibility to adapt its approach, but that flexibility comes with unpredictability. For conversational interfaces where adaptability matters, this trade-off is often worthwhile. For batch processing where predictability matters, other approaches may be better suited.
+
 ---
 
 ## Key Takeaways
@@ -856,6 +915,8 @@ These principles apply regardless of which agent framework you choose:
 
 4. **Single responsibility for agents** - Each agent does one thing well. Coordination happens in a dedicated orchestrator (for now - we'll revisit this in Part 2).
 
+5. **Expect variance with runtime orchestration** - When an LLM decides the workflow at runtime, identical inputs can produce different execution paths. Setting temperature to zero or using a seed won't necessarily fix this - the variance is architectural, not sampling randomness.
+
 ---
 
 ## View the Code
@@ -864,9 +925,7 @@ All patterns described here are implemented in the reference codebase:
 
 - **[Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
-- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
 
-The code is meant to be read and learned from, not just used. Star the repo if you find it useful! ⭐
 
 ---
 
