@@ -1,15 +1,17 @@
 # From Orchestrator to Autonomous: What Happens When Every Agent Thinks
 
-In Part 1, we built a YouTube research assistant with an orchestrator coordinating four specialized agents. The orchestrator received user requests, delegated to specialists, collected results, and synthesized responses. It worked - and for many use cases, it's the right pattern.
+In Part 1, we discussed a YouTube research assistant with an orchestrator coordinating four specialized agents. The orchestrator received user requests, delegated to specialists, collected results, and synthesized responses. It worked - and for many use cases, it's the right pattern.
 
-But I noticed something: almost every multi-agent example I encountered followed this same orchestrator pattern. A central coordinator, specialized workers, hub-and-spoke communication. It works, but is it the only way?
+But I noticed something: most of the multi-agent examples I encountered followed this same orchestrator pattern. A central coordinator, specialized workers, hub-and-spoke communication. It works, but is it the only way?
 
 ```
-Orchestrator Pattern (what everyone does):
+Orchestrator Pattern:
 User → Orchestrator → Agent A → Orchestrator → Agent B → Orchestrator → User
 ```
 
-I wanted to explore a different paradigm. What if agents could coordinate directly, without a central hub? What if each agent understood the overall goal and could decide for itself what should happen next?
+I wanted to explore a different paradigm - what happens when you remove the central coordinator entirely? What if agents could coordinate directly, without a central hub? What if each agent understood the overall goal and could decide for itself what should happen next?
+
+This led to exploring autonomous agent patterns—where coordination emerges from agents reasoning about goals rather than being dictated by a central hub
 
 ```
 Autonomous Pattern (emergent coordination):
@@ -20,9 +22,8 @@ This isn't necessarily *better* than orchestration - it's a different set of tra
 
 ## In this article, we shall cover:
 
-- Why the orchestrator pattern dominates multi-agent examples (and when it's the right choice)
-- An alternative: agents that reason about goals and hand off to each other
-- Implementing event-driven coordination with zero polling overhead
+- Agents that reason about goals and hand off to each other
+- Implementing event-driven coordination and agent self-assignment
 - Parallel execution patterns with decentralized fan-out/fan-in
 - How to choose between orchestration and autonomous patterns
 
@@ -30,24 +31,31 @@ This isn't necessarily *better* than orchestration - it's a different set of tra
 
 ## Recap: The Orchestrator Pattern
 
-In [Part 1](part1_architecture.md), we built a YouTube research assistant using the orchestrator pattern - a central coordinator delegating to specialized agents. Before exploring alternatives, let's revisit why this pattern is so common and where its tradeoffs lie.
+Before exploring alternatives, let's be precise about what the orchestrator pattern actually does and where its limitations lie.
 
-Consider a multi-step research task: "Find videos about Kamado cooking, get their transcripts, summarize the key temperatures and times, and save to a markdown file."
+Recall from [Part 1](part1_architecture.md), we were considering a multi-step research task: "Find videos about Kamado cooking, get their transcripts, summarize the key temperatures and times, and save to a markdown file."
 
-With an orchestrator:
+With an orchestrator, the logs show a hub-and-spoke pattern—every interaction flows through the centre:
 
-1. User → Orchestrator: "Find videos about Kamado cooking..."
-2. Orchestrator → SearchAgent: "Search for Kamado cooking videos"
-3. SearchAgent → Orchestrator: "Found 5 videos: [list]"
-4. Orchestrator → TranscriptAgent: "Get transcripts for these videos"
-5. TranscriptAgent → Orchestrator: "Here are the transcripts: [text]"
-6. Orchestrator → SummarizeAgent: "Summarize temperatures and times"
-7. SummarizeAgent → Orchestrator: "Key findings: [summary]"
-8. Orchestrator → WriterAgent: "Save this to markdown"
-9. WriterAgent → Orchestrator: "Saved to output/kamado_notes.md"
-10. Orchestrator → User: "Done! Here's your summary..."
+```
+10:42:15 [INFO] orchestrator: Received request: Find videos about Kamado cooking...
+10:42:17 [INFO] orchestrator: Delegating to SearchAgent
+10:42:18 [INFO] search_agent: Found 5 videos
+10:42:18 [INFO] orchestrator: SearchAgent returned results
+10:42:19 [INFO] orchestrator: Delegating to TranscriptAgent
+10:42:22 [INFO] transcript_agent: Fetched 3 transcripts
+10:42:22 [INFO] orchestrator: TranscriptAgent returned results
+10:42:23 [INFO] orchestrator: Delegating to SummarizeAgent
+10:42:26 [INFO] summarize_agent: Generated summary
+10:42:26 [INFO] orchestrator: SummarizeAgent returned results
+10:42:27 [INFO] orchestrator: Delegating to WriterAgent
+10:42:27 [INFO] writer_agent: Saved to kamado_notes.md
+10:42:27 [INFO] orchestrator: Request completed
+```
 
-This works well. The orchestrator has full visibility, can handle errors gracefully, and maintains conversational context. For interactive, conversational applications, it's often the right choice.
+Notice how every result returns to the orchestrator before the next step begins. The orchestrator accumulates context from each agent, maintaining full visibility of the workflow.
+
+This works well for interactive, conversational applications where that accumulated context enables natural follow-up questions.
 
 But the pattern has characteristics worth noting:
 - **The coordinator sees everything**: Context accumulates at the center
@@ -61,22 +69,31 @@ But the pattern has characteristics worth noting:
 - Long contexts can degrade response quality as the model has more to attend to
 - You eventually hit context window limits on complex workflows
 
-**LLM call multiplication.** When the orchestrator delegates to a sub-agent like SearchAgent, that agent is itself a ChatAgent with tools. Each tool call in an agentic loop requires an LLM round-trip. In our reference implementation, a simple "search → transcript → summarize → write" workflow generates around **7 LLM calls** - efficient because the sub-agents typically complete in one or two turns each. However, this number can grow if agents need multiple tool calls or retries.
+**LLM call multiplication.** When the orchestrator delegates to a sub-agent like SearchAgent, that agent is itself a ChatAgent with tools. Each tool call in an agentic loop requires an LLM round-trip. When testing the reference implementation, a "search → transcript → summarize → write" workflow usually generated around **17-34 LLM calls** with significant variance between runs—and as we showed in Part 1, setting temperature to zero and specifying a seed doesn't eliminate this variance.
+
+Why such variance? The orchestrator LLM makes different tactical decisions each time:
+- **Search strategy**: One run might do a single combined search; another might run 3 parallel targeted searches
+- **Step skipping**: Some runs skip summarization entirely, sending transcripts directly to the writer
+- **Delegation phrasing**: How the orchestrator words its request to sub-agents affects their behaviour—one phrasing might cause a sub-agent to fail while another succeeds
+
+This variance isn't a bug—it's the inherent nature of letting an LLM decide the workflow at runtime.
 
 These aren't reasons to avoid orchestration - for conversational interfaces, context accumulation is a feature, not a bug. But they're worth understanding as you choose patterns.
 
 I explored several alternative patterns:
-- **Dispatcher pattern**: A router that assigns tasks but doesn't coordinate results
-- **Capability-based routing**: Match tasks to agents by declared capabilities
-- **Explicit planning**: An LLM generates a DAG of steps upfront
+- **Agent self-selection**: Agents monitor a shared queue and bid to claim tasks. But what if multiple agents bid? What if none do? What if the LLM consistently makes the wrong decision? This requires tie-breaking, fallback logic, and N LLM calls per task (one per agent).
+- **Capability-based routing**: Match tasks to agents by declared capabilities. Elegant for simple cases, but breaks down when an intent requires multiple steps: "Get transcripts AND summarize" - which agent goes first?
+- **Explicit planning**: An LLM generates a DAG of steps upfront. Predictable, but inflexible - can't adapt based on what you find.
 
 Each had merits, but they also had complexity. Eventually, a simpler insight emerged: **what if every agent understood the goal and could decide what happens next?**
 
 ---
 
-## The Core Shift: Every Agent Thinks
+## The Autonomous Pattern: Distributed Intelligence
 
 In the orchestrator model, we had one "smart" coordinator directing "dumb" workers. The orchestrator knew the goal; agents just executed commands.
+
+What if we flipped this? What if every agent was "smart"?
 
 In the autonomous model, every agent receives two things:
 1. **The original goal** - what the user actually asked for
@@ -84,55 +101,6 @@ In the autonomous model, every agent receives two things:
 
 Each agent then reasons: "Given this goal and what we have so far, can I complete the request? Or should someone else continue?"
 
-### The Structure
-
-The codebase structure changes to support this pattern:
-
-```
-src/youtube_autonomous_agents/
-├── cli/                  # Entry points (same as before)
-│   ├── commands.py
-│   └── main.py
-├── agents/               # Now with goal-aware execution
-│   ├── base.py           # BaseAgent with execute_autonomous()
-│   ├── search.py
-│   ├── transcript.py
-│   ├── summarize.py
-│   └── writer.py
-├── infra/                # Coordination infrastructure
-│   ├── pool.py           # SelfSelectingPool
-│   ├── registry.py       # Agent discovery
-│   ├── task_queue.py     # Event-driven queue
-│   └── intent_router.py  # LLM-based routing
-└── models/
-    ├── task.py           # Task, TaskResult
-    └── handoff.py        # HandoffResult types
-```
-
-The key differences from the orchestrator pattern:
-- No central orchestrator agent
-- New `infra/` layer for coordination primitives
-- Agents gain `execute_autonomous()` method
-- New `HandoffResult` types for explicit signaling
-
-**What doesn't change**: The domain layer. YouTube search, transcript fetching, summarization - all the actual work - stays in the same services. The autonomous pattern is a coordination layer, not a rewrite of business logic.
-
-### How Agent Definitions Change
-
-In Part 1, we saw agents defined with instructions and tools:
-
-```python
-# Orchestrator pattern: agent executes tools, returns to coordinator
-SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent..."""
-
-def create_search_agent() -> ChatAgent:
-    return ChatAgent(
-        chat_client=get_chat_client(),
-        name="SearchAgent",
-        instructions=SEARCH_AGENT_INSTRUCTIONS,
-        tools=[search_youtube_formatted],
-    )
-```
 
 In the autonomous pattern, agents gain goal-awareness:
 
@@ -155,23 +123,71 @@ class SearchAgent(BaseAgent):
         # Do the search
         results = await search_youtube(query)
 
-        # Reason: is the goal satisfied?
-        if self._goal_is_satisfied(goal, results):
+        # LLM reasons: is the goal satisfied?
+        reasoning = await self._reason_about_goal(goal, results)
+
+        if reasoning["satisfied"]:
             return HandoffResult.complete(results)
         else:
             return HandoffResult.handoff(
-                intent="Get transcripts for these videos",
+                intent=reasoning["next_step"],  # LLM determines this
                 state={**state, "videos": results}
             )
 ```
 
+The agent doesn't just execute and return. The agent still calls the same `search_youtube` service, but now it also understands the user's intent and reasons about what should happen next; deciding whether to complete or hand off to another agent.
+
+This is philosophically different from most agent frameworks. The agent isn't just following commands—it's reasoning about goals and making architectural decisions about the appropriate next step.
+
 The agent still calls the same `search_youtube` service. But now it also reasons about what should happen next.
 
-This is philosophically different from most agent frameworks. The agent isn't just executing a command - it's understanding intent and deciding the appropriate next step.
 
-### The Complexity Trade-Off
 
-Let's be explicit about what this costs. Here's the complete V1 SearchAgent:
+### What Changes in the Architecture
+
+The domain layer stays the same - YouTube search, transcript fetching, summarization. Those services don't change. What changes is the coordination layer.
+
+Here's the new structure:
+
+```
+src/youtube_goal_agents/
+├── cli/                  # Entry points (same as before)
+│   ├── commands.py
+│   └── main.py
+├── agents/               # Goal-aware agents
+│   ├── base.py           # BaseAgent with execute_autonomous() and validate_assignment()
+│   ├── search.py
+│   ├── transcript.py
+│   ├── summarize.py
+│   ├── synthesizer.py    # Analyzes requests for parallelism opportunities
+│   └── writer.py
+├── infra/                # Coordination infrastructure
+│   ├── pool.py           # DispatcherPool - routes tasks, handles rejections
+│   ├── registry.py       # Agent discovery
+│   ├── task_queue.py     # Event-driven queue
+│   ├── intent_router.py  # LLM-based routing with exclusion support
+│   ├── loop_detector.py  # Detects and prevents infinite handoff cycles
+│   └── session.py        # State management and variable resolution
+└── models/
+    ├── task.py           # Task, TaskResult
+    └── handoff.py        # HandoffResult, ValidationResult types
+```
+
+The key differences from the orchestrator pattern:
+- **Goal-aware agents**: Each agent understands the user's goal and reasons about satisfaction
+- **Dispatcher with confirmation**: LLM router assigns tasks, agents can validate and reject
+- **Structured handoffs**: Explicit `HandoffResult` and `ValidationResult` types
+- **Event-driven coordination**: Zero polling overhead, efficient task distribution
+
+
+All the actual work - stays in the same services; in the reference architecture, these are directly reused from the orchestrator pattern. The autonomous pattern is a coordination layer, not a rewrite of business logic.
+
+
+### The Complexity Trade-Off (Being Honest About It)
+
+ Autonomous agents are more complex; let's be explicit about what this costs. 
+ 
+ Consider the SearchAgent used with the orchestrator pattern:
 
 ```python
 # V1 SearchAgent - ~30 lines total (entire file)
@@ -191,7 +207,7 @@ def create_search_agent() -> ChatAgent:
     )
 ```
 
-And here's the V2 SearchAgent structure:
+And here's the autonomous SearchAgent structure:
 
 ```python
 # V2 SearchAgent - 360+ lines
@@ -209,54 +225,103 @@ class SearchAgent(BaseAgent):
     @property
     def description(self) -> str: ...
 
-    async def execute(self, task: Task) -> TaskResult:
-        """For DAG pattern compatibility."""
-        ...
-
     async def execute_autonomous(self, goal: str, state: dict) -> HandoffResult:
         """Goal-aware execution with handoff decisions."""
-        # Handle parallel results recovery
         # Extract query from goal (LLM call)
         # Execute search
         # Reason about goal satisfaction (LLM call)
-        # Return complete or handoff
+        # Decide: complete or handoff
+        # Handle parallel task merging
         ...
 
     async def _reason_about_goal(self, goal: str, results: dict) -> dict:
-        """LLM-based goal satisfaction reasoning."""
+        """LLM-based reasoning about whether goal is satisfied."""
         ...
 
     async def _extract_query_from_goal(self, goal: str) -> str:
-        """LLM-based query extraction."""
+        """Parse intent into actionable query."""
         ...
 
-    def _interleave_videos(self, video_lists: list) -> list:
-        """Merge parallel search results."""
+    def _interleave_parallel_results(self, result_lists: list):
+        """Merge results from parallel execution."""
         ...
 ```
 
-The V2 agents are **10-12x larger** because they:
+I found that generally, the autonomous agents are **10-12x larger** because they:
 
 1. **Reason about goal satisfaction** - "Is the user's goal met, or should someone continue?"
 2. **Decide whether to complete or hand off** - with explicit `HandoffResult` types
 3. **Handle parallel task merging** - interleaving results from fan-out operations
 4. **Extract intents from natural language** - parsing complex requests into actions
 
-This is the cost of distributed intelligence. When you move decision-making from a central orchestrator into every agent, each agent needs the machinery to make those decisions. The orchestrator pattern centralizes this complexity; the autonomous pattern distributes it.
+This is the price of distributed intelligence. When you move decision-making from a central orchestrator into every agent, each agent needs the machinery to make those decisions. The orchestrator pattern centralizes this complexity; the autonomous pattern distributes it.
 
-**Is it worth it?** That depends on your use case. For simple, predictable workflows, the V1 pattern's simplicity is a feature. For adaptive workflows with parallelism opportunities, the V2 pattern's per-agent reasoning enables capabilities that are hard to achieve with central coordination.
+**Is it worth it?** That depends on your use case. For simple, predictable workflows, the orchestrator pattern's simplicity is a feature. For adaptive workflows with parallelism opportunities, the autonomous pattern's per-agent reasoning enables capabilities that are hard to achieve with central coordination.
 
-### Why This Matters
+For example:
+- **No context bottleneck**: State flows forward through the chain, not back to a central point. Each agent only sees what's relevant.
 
-**No context bottleneck**: State flows forward through the chain, not back to a central point. Each agent only sees what's relevant.
+- **Adaptive workflows**: Agents respond to what they find. If search returns no results, the SearchAgent can hand off with "Try a different query" rather than blindly continuing.
 
-**Adaptive workflows**: Agents respond to what they find. If search returns no results, the SearchAgent can hand off with "Try a different query" rather than blindly continuing.
+- **Easy extensibility**: Adding a new agent doesn't require updating a central orchestrator. If the new agent can handle certain intents, it will be routed tasks naturally.
 
-**Easy extensibility**: Adding a new agent doesn't require updating a central orchestrator. If the new agent can handle certain intents, it will be routed tasks naturally.
+### Why Fewer LLM Calls (The Execution Model Trade-off)
+
+You might expect the autonomous pattern to require *more* LLM calls—after all, every agent now reasons about goals. But benchmarking shows the opposite; on the task described in part 1, the autonomous architecture consistently uses 11 calls vs the orchestrator's wider range of 17-34. Why?
+
+The difference is in how work gets executed:
+
+**V1 Orchestrator - LLM drives execution:**
+```python
+# V1: Agent is a ChatAgent with tools
+def create_search_agent() -> ChatAgent:
+    return ChatAgent(
+        tools=[search_youtube_formatted],  # LLM decides when to call
+    )
+
+# When orchestrator delegates, the sub-agent runs an agentic loop:
+# LLM → "should I call search_youtube?" → tool executes → LLM → "done?"
+```
+
+Each sub-agent runs an **agentic tool loop** where the LLM decides whether to call tools, sees results, and decides again. This can be 2-4+ LLM calls per agent invocation.
+
+**V2 Autonomous - Code drives execution, LLM reasons:**
+```python
+# V2: Agent calls services directly
+async def execute_autonomous(self, goal: str, state: dict) -> HandoffResult:
+    # Get query from state (passed by previous agent) or extract it
+    query = state.get("query") or await self._extract_query_from_goal(goal)  # LLM call if needed
+
+    results = await search_youtube(query)  # Direct call - always happens
+
+    reasoning = await self._reason_about_goal(goal, results)  # LLM decides what's next
+    if reasoning["satisfied"]:
+        return HandoffResult.complete(results)
+    else:
+        return HandoffResult.handoff(intent=reasoning["next_step"], state={...})
+```
+
+The key differences:
+- **No tool-decision loop**: The service call always happens—no LLM deciding "should I call this?" By the time `execute_autonomous` runs, the agent already claimed the task via `can_handle()` (see [How Routing Actually Works](#how-routing-actually-works)), so it knows it's supposed to do its job.
+- **State carries context**: Previous agents can pass `query` in state, skipping extraction entirely
+- **Single execution**: The agent calls the service once, not iteratively based on results
+
+**The trade-off:**
+
+| Aspect | V1 (Agentic Loop) | V2 (Direct Calls) |
+|--------|-------------------|-------------------|
+| LLM calls per agent | 2-4+ (variable) | 1-2 (fixed) |
+| Error recovery | LLM can retry or try alternatives | Code handles errors, returns `PartialResult` |
+| Flexibility | LLM adapts execution strategy | Fixed execution, adaptive handoffs |
+| Predictability | Low (LLM decides approach) | High (code decides approach) |
+
+V2 trades execution-level flexibility for predictability. If a service call fails, the agent returns a `PartialResult` with graceful degradation—but it won't automatically retry or try a different approach like V1's agentic loop might.
+
+**Alternative approach:** You could implement V2 agents with their own agentic loops by using the `execute()` method (which uses `ChatAgent` with tools) instead of `execute_autonomous()`. This would give you LLM-driven execution with goal-aware handoffs—at the cost of more LLM calls and less predictability. I chose direct service calls specifically to minimize LLM calls and maximize predictability, accepting the trade-off of less flexible execution.
 
 ### How This Differs from Framework Handoffs
 
-If you're familiar with [Microsoft's Agent Framework](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/handoff), you might notice similarities - agents transfer control to each other without a central orchestrator. But the patterns differ in meaningful ways:
+If you're familiar with [Microsoft's Agent Framework](https://learn.microsoft.com/en-us/agent-framework/user-guide/workflows/orchestrations/handoff), you might notice similarities with the built-in handoff pattern - agents transfer control to each other without a central orchestrator. But the patterns differ in meaningful ways:
 
 **Microsoft's Handoff Pattern:**
 - Handoff paths are **declared upfront** (`.add_handoff(triage, [technical, billing])`)
@@ -278,11 +343,11 @@ Both patterns avoid central orchestration. The choice depends on whether you nee
 
 ---
 
-## Structured Completion Signaling
+## Structured Completion Signalling
 
-Most frameworks return strings or dictionaries from agent calls. This creates ambiguity: How do you know if the agent is done, or if it expects another agent to continue?
+One of the first complexities I encountered during experimentation was that agents needed a clear way to signal their intent: "I'm done" vs "Someone else should continue" vs "Multiple things can happen in parallel."
 
-We solved this with explicit result types:
+I solved this with explicit result types:
 
 ```python
 @dataclass
@@ -325,23 +390,15 @@ return HandoffResult.fan_out(
 )
 ```
 
-The validation is built into the type:
+The type system enforces validity. Return "complete" without a result? Construction fails. Return "fan_out" with only one intent? Validation catches it.
 
-```python
-def __post_init__(self):
-    if self.action == "complete" and self.result is None:
-        raise ValueError("Complete action requires a result")
-    if self.action == "handoff" and self.intent is None:
-        raise ValueError("Handoff action requires an intent")
-    if self.action == "fan_out" and len(self.intents or []) < 2:
-        raise ValueError("Fan out requires at least 2 intents")
-```
-
-No string parsing. No conventions about special return values. The type system enforces clarity.
+This eliminates an entire class of coordination bugs. No string parsing, no conventions, no ambiguity.
 
 ### Failures as First-Class Domain Objects
 
-We extended this pattern to handle failures gracefully:
+One of the advantages of the autonomous pattern is that agents can reason about failures as part of their decision-making, and attempt to recover gracefully.
+
+To enable this, I extended the handoff pattern to handle failures explicitly:
 
 ```python
 @dataclass
@@ -378,80 +435,246 @@ if isinstance(result, OperationTimeout):
     )
 ```
 
-This is much better than try/except scattered everywhere. The agent can make an informed decision about how to proceed.
+This is better than try/except scattered throughout the codebase. Failures become first-class domain objects that agents can reason about.
+
+### Partial Failures in Parallel Execution
+
+These failure types become especially valuable in fan-out scenarios. When you run parallel searches across multiple channels, some might succeed while others fail:
+
+```python
+async def _check_group_completion(self, group: TaskGroup) -> None:
+    """Handle completion of a parallel task group."""
+
+    if not group.is_complete:
+        return
+
+    # Some tasks succeeded, some failed
+    if group.errors and group.results:
+        # Create a partial result - we have some data to work with
+        partial = PartialResult(
+            error=f"{len(group.errors)} of {len(group.task_ids)} searches failed",
+            partial_data={"successful_results": group.results},
+            completed_steps=[f"search_{tid}" for tid in group.results.keys()]
+        )
+
+        # Post join task with partial data - let downstream agents decide
+        await self._post_join_task(
+            group,
+            state={**group.state, "partial_result": partial.to_dict()}
+        )
+    elif group.errors:
+        # All failed - surface the error
+        await self._complete_with_error(group, group.errors)
+    else:
+        # All succeeded - normal flow
+        await self._post_join_task(group)
+```
+
+The downstream agent (e.g., TranscriptAgent) can then reason about the partial result:
+
+```python
+if "partial_result" in state:
+    partial = state["partial_result"]
+    logger.warning(f"Working with partial data: {partial['error']}")
+    # Continue with what we have rather than failing entirely
+    videos = partial["partial_data"]["successful_results"]
+```
+
+This pattern prevents a single failure from derailing an entire workflow. If one of three parallel searches times out, we still get results from the other two.
 
 ---
 
-## Event-Driven Coordination
+## Dispatcher Pattern: Centralized Routing with Agent Confirmation
 
-With agents that can hand off to each other, we need a coordination mechanism. The naive approach is a polling loop:
+With agents that can hand off to each other, we need a coordination mechanism. The obvious question: who decides which agent handles a task?
+
+### Why Not True Self-Selection?
+
+True self-selection would have agents "bid" for tasks:
 
 ```python
-# Naive: agents poll constantly
-while True:
-    task = queue.get_nowait()
-    if task and self.can_handle(task):
-        await self.execute(task)
-    await asyncio.sleep(0.05)  # Poll every 50ms
+# True self-selection (not what we do):
+# 1. Task arrives
+# 2. All agents evaluate: "Can I handle this? How confident am I?"
+# 3. Agents submit bids with confidence scores
+# 4. Highest bidder wins
 ```
 
-This wastes CPU cycles when the queue is empty - which, in a bursty workload, is most of the time.
+This sounds elegant but introduces complexity:
+- **Multiple LLM calls per task**: Every agent reasons about every task
+- **Tie-breaking**: What if two agents bid equally?
+- **Latency**: Must wait for all bids before proceeding
+- **Wasted computation**: Most bids are losers
 
-### Event-Driven with asyncio
+Instead, we use a **dispatcher pattern** with a twist: agents can confirm or reject their assignment.
 
-Python's `asyncio` provides the building blocks for efficient coordination. We use events for notifications and atomic operations for task claiming:
+### The Dispatcher Pattern
+
+A central LLM-based router makes the initial decision, but the assigned agent validates before executing:
 
 ```python
-class SelfSelectingPool:
-    """Pool where agents autonomously watch and claim tasks."""
+class DispatcherPool:
+    """Pool where a dispatcher routes tasks, but agents confirm assignments."""
 
-    async def _agent_watcher(self, agent: BaseAgent) -> None:
-        """Each agent runs this loop independently."""
+    async def _execute_task(self, agent: BaseAgent, task: Task) -> None:
+        """Execute with agent confirmation."""
 
-        while not self._shutdown.is_set():
-            # Wait for notification - zero CPU when idle
-            has_task = await self._registry.wait_for_task_available(
-                timeout=0.5
-            )
+        # Agent validates the assignment using LLM reasoning
+        validation = await agent.validate_assignment(task)
 
-            if not has_task:
-                continue  # Timeout, check shutdown and wait again
+        if not validation.accepted:
+            # Agent rejected - re-route to another agent
+            await self._handle_rejection(agent, task, validation)
+            return
 
-            # Peek at the next unclaimed task
-            task = await self._registry.peek_next_task()
-            if task is None:
-                continue  # Another agent claimed it
+        # Agent accepted - proceed with execution
+        result = await agent.execute_autonomous(...)
+```
 
-            # Can I handle this?
-            if not agent.can_handle(task):
-                continue  # Not for me
+This gives us the best of both worlds:
+- **Efficient routing**: Single LLM call decides initial assignment
+- **Error correction**: Agents can reject mis-routed tasks
+- **Clear accountability**: Each rejection includes a reason
 
-            # Try to claim it (atomic operation)
-            claimed = await self._registry.try_claim(task.id, agent.name)
-            if not claimed:
-                continue  # Another agent got it first
+### Agent Confirmation in Practice
 
-            # Execute the task
+Here's what this looks like in the logs from a real execution:
+
+```
+[15:42:26] Agent 'search' claimed task 4c8f97e3
+[15:42:29] Agent 'search' rejected task 4c8f97e3:
+           THE TASK REQUIRES FETCHING TRANSCRIPTS AND SUMMARIZING TECHNIQUES,
+           BUT MY ROLE IS LIMITED TO FINDING RELEVANT YOUTUBE VIDEOS
+           WITHOUT RETRIEVING TRANSCRIPTS OR SUMMARIZING CONTENT.
+[15:42:29] Re-routing task 4c8f97e3 from 'search' to 'transcript'
+```
+
+The search agent was initially assigned the join task (which needed transcript fetching), but it correctly rejected the assignment with reasoning. The pool re-routed to the transcript agent.
+
+### The Validation Method
+
+Each agent validates assignments using LLM reasoning:
+
+```python
+async def validate_assignment(self, task: Task) -> ValidationResult:
+    """Validate whether this agent should handle the assigned task."""
+
+    intent = task.context.get("intent", task.description)
+
+    prompt = f"""You are the {self.name} agent. Your role: {self.description}
+
+A task has been routed to you:
+INTENT: "{intent}"
+
+Should you handle this task?
+- Answer YES if this task matches your capabilities and role
+- Answer NO if this task should be handled by a different agent
+
+Respond in this exact format:
+DECISION: YES or NO
+REASON: Brief explanation (1 sentence)"""
+
+    response = await self._client.get_response(prompt)
+    response_text = response.text.strip().upper()
+
+    if "DECISION: YES" in response_text or response_text.startswith("YES"):
+        return ValidationResult.accept()
+    else:
+        reason = f"{self.name} rejected: task doesn't match my role"
+        if "REASON:" in response_text:
+            reason = response_text.split("REASON:")[-1].strip()
+        return ValidationResult.reject(reason)
+```
+
+### Handling Rejections
+
+When an agent rejects, we re-route with context:
+
+```python
+async def _handle_rejection(
+    self,
+    agent: BaseAgent,
+    task: Task,
+    validation: ValidationResult
+) -> None:
+    """Handle agent rejection and re-route task."""
+
+    # Track routing attempts to prevent infinite loops
+    attempts = task.context.get("routing_attempts", [])
+    attempts.append({
+        "agent": agent.name,
+        "rejected": validation.rejection_reason
+    })
+
+    # Max 3 attempts before failing
+    if len(attempts) >= 3:
+        task.status = TaskStatus.FAILED
+        task.result = TaskResult(
+            success=False,
+            error=f"Max routing attempts exceeded. Rejections: {attempts}"
+        )
+        return
+
+    # Build exclusion list - don't route back to rejecting agents
+    excluded = [a["agent"] for a in attempts]
+
+    # Re-route with rejection context
+    new_target = await self._intent_router.find_agent_for_intent(
+        intent=task.context["intent"],
+        registry=self._registry,
+        excluded_agents=excluded,
+        rejection_context=validation.rejection_reason
+    )
+
+    # Update task and resubmit
+    task.context["routed_to"] = new_target.name if new_target else None
+    task.context["routing_attempts"] = attempts
+    await self._registry.submit_async(task)
+```
+
+### Why This Approach?
+
+| Aspect | True Self-Selection | Dispatcher + Confirmation |
+|--------|---------------------|---------------------------|
+| **LLM calls per task** | N (all agents bid) | 1-3 (route, maybe re-route) |
+| **Latency** | High (wait for all bids) | Low (single decision) |
+| **Error recovery** | Complex (re-bid?) | Simple (re-route with context) |
+| **Accountability** | Unclear (who decided?) | Clear (dispatcher + agent reasons) |
+
+The dispatcher pattern trades theoretical elegance for practical efficiency. We still get agent autonomy through the confirmation step, but avoid the complexity of a full bidding system.
+
+### Event-Driven Execution
+
+The pool uses `asyncio.Event` for efficient coordination:
+
+```python
+async def _agent_watcher(self, agent: BaseAgent) -> None:
+    """Each agent watches for tasks assigned to it."""
+
+    while not self._shutdown.is_set():
+        # Wait for notification - zero CPU when idle
+        has_task = await self._registry.wait_for_task_available(timeout=0.5)
+
+        if not has_task:
+            continue
+
+        # Check for tasks routed to this agent
+        task = await self._registry.peek_next_task()
+        if task is None or not agent.can_handle(task):
+            continue
+
+        # Claim and execute (with validation)
+        if await self._registry.try_claim(task.id, agent.name):
             await self._execute_task(agent, task)
 ```
 
-The key insight: `wait_for_task_available` uses `asyncio.Event`, not polling. When a task is added to the queue, the event is set, waking all waiting agents. They compete to claim the task, but only one succeeds (atomic claiming).
-
-### Why This Matters for Production
-
-**Scales to many agents**: Adding more agents doesn't increase CPU usage when idle. They all sleep on the same event.
-
-**Natural load balancing**: Busy agents (still executing a task) don't compete for new work. The idle agents claim tasks first.
-
-**Easy to add/remove agents**: Registration is just adding an agent to the pool. No central configuration to update.
-
-**Zero polling overhead**: The system uses essentially no CPU when waiting for work.
+This gives us zero polling overhead - agents sleep on events until work arrives.
 
 ---
 
 ## Intent Routing: Why Keywords Aren't Enough
 
-When an agent hands off with an intent like "Get transcripts for these videos AND summarize the key points", which agent handles it?
+Consider the scenario when an agent hands off with an intent like "Get transcripts for these videos AND summarize the key points", which agent handles it?
 
 Keyword matching would see both "transcripts" and "summarize" and match multiple agents. Who goes first?
 
@@ -497,33 +720,104 @@ Respond with only the agent name."""
         return registry.get_agent(agent_name)
 ```
 
-The LLM understands that "get transcripts AND summarize" requires transcripts first. It routes to the transcript agent, which will later hand off to the summarize agent.
+The LLM understands sequential dependencies: "get transcripts AND summarize" requires transcripts first. It routes to the transcript agent, which will later hand off to the summarize agent.
 
-### Three-Tier Routing Priority
+### How Routing Actually Works
 
-We use a cascade:
+Here's the actual flow when an agent hands off:
 
-1. **Explicit routing**: If the previous agent specified a target via LLM routing, respect it
-2. **Capability matching**: Fast, deterministic matching on declared capabilities
-3. **LLM fallback**: For complex or ambiguous intents
+```
+                    ┌──────────────────────────────────────────────────────┐
+                    │           BEFORE QUEUE (routing decision)            │
+                    │                                                      │
+  Agent returns     │    ┌─────────────────┐                               │
+  HandoffResult ────┼───►│ LLMIntentRouter │  "Which agent handles this?"  │
+                    │    └────────┬────────┘                               │
+                    │             │                                        │
+                    │             ▼                                        │
+                    │    Task created with routed_to="transcript"          │
+                    └──────────────────────────┬───────────────────────────┘
+                                               │
+                                               ▼
+                    ┌──────────────────────────────────────────────────────┐
+                    │                      QUEUE                           │
+                    │                                                      │
+                    │    Task { routed_to: "transcript", intent: "..." }   │
+                    │                                                      │
+                    └──────────────────────────┬───────────────────────────┘
+                                               │
+                         Queue signals: "task available!"
+                                               │
+                    ┌──────────────────────────┼───────────────────────────┐
+                    │           AGENT WATCHERS (all wake up)               │
+                    │                          │                           │
+                    │    SearchAgent:     routed_to == "search"? NO        │
+                    │    TranscriptAgent: routed_to == "transcript"? YES ◄─┘
+                    │    SummarizeAgent:  routed_to == "summarize"? NO     │
+                    │                                                      │
+                    │    (Simple string comparison - no LLM calls)         │
+                    └──────────────────────────┬───────────────────────────┘
+                                               │
+                                               ▼
+                    ┌──────────────────────────────────────────────────────┐
+                    │              VALIDATION (safety net)                 │
+                    │                                                      │
+                    │    TranscriptAgent.validate_assignment(task)         │
+                    │    "Am I really the right agent?" (LLM call)         │
+                    │                                                      │
+                    │         ACCEPT ──► execute_autonomous()              │
+                    │         REJECT ──► re-route (excluding me)           │
+                    └──────────────────────────────────────────────────────┘
+```
 
+1. **Agent returns handoff**: `HandoffResult.handoff(intent="Get transcripts and summarize...")`
+
+2. **Pool calls LLM router** (before task submission):
+```python
+# In pool._handle_handoff():
+target_agent = await self._intent_router.find_agent_for_intent(intent, registry)
+routed_to = target_agent.name if target_agent else None
+```
+
+3. **Pool creates task with `routed_to` pre-set**:
+```python
+handoff_task = Task(
+    description=intent,
+    context={"routed_to": routed_to, "intent": intent, ...}
+)
+```
+
+4. **Target agent claims task** - routing is already decided:
 ```python
 def can_handle(self, task: Task) -> bool:
-    # Priority 1: Was I explicitly routed this task?
-    if task.context.get("routed_to") == self.name:
-        return True
+    # LLM already routed this task
+    routed_to = task.context.get("routed_to")
+    if routed_to is not None:
+        return routed_to == self.name  # Only the target agent claims it
 
-    # Priority 2: Do my capabilities match?
+    # Fallback: capability matching (only if LLM routing failed)
     if task.required_capabilities:
         return any(cap in self.capabilities
                    for cap in task.required_capabilities)
 
-    # Priority 3: Intent-based fallback
-    intent = task.context.get("intent", "")
-    return self._can_handle_intent(intent)
+    return False
 ```
 
-This gives us the speed of capability matching for simple cases, with LLM reasoning available for complex multi-step intents.
+5. **Agent validates before executing** - can reject with reason:
+```python
+# In pool._execute_task():
+validation = await agent.validate_assignment(task)
+
+if not validation.accepted:
+    # Re-route to another agent with exclusion list
+    await self._handle_rejection(agent, task, validation)
+    return
+
+# Proceed with execution
+result = await agent.execute_autonomous(...)
+```
+
+The key insight: **LLM routing happens once per handoff**, but the assigned agent gets a chance to validate. If it rejects, the task is re-routed with the rejecting agent excluded. This catches dispatcher mistakes without requiring all agents to evaluate every task.
 
 ---
 
@@ -761,7 +1055,7 @@ if current_agent in recent_path:
 
 ```bash
 # Verbose mode shows all agent decisions
-uv run youtube-agent-v2 -v chat -r "Find pork loin recipes and summarize"
+uv run youtube-autonomous -v chat -r "Find pork loin recipes and summarize"
 
 # Output shows reasoning at each step:
 [SearchAgent] Executing: "Find pork loin recipes"
@@ -803,23 +1097,19 @@ We now have two patterns: the orchestrator from Part 1, and the autonomous patte
 
 | Metric | Orchestrator (V1) | Autonomous (V2) |
 |--------|-------------------|-----------------|
-| **LLM calls per step** | 1 (orchestrator decides) | 2 (routing + reasoning) |
+| **Total LLM calls** | 17-34 (high variance) | 11 (zero variance) |
+| **Predictability** | Low (LLM decides workflow scope at runtime) | High (each agent completes its job before handoff—no step skipping) |
 | **Context growth** | Accumulates at center | Flows forward |
 | **Adaptability** | High (conversational) | High (goal-aware) |
 | **Parallelism** | Manual coordination | Built-in (event-driven) |
 | **Debugging** | Single point of control | Distributed execution path |
-| **Cost per step** | Lower (fewer calls) | Higher (routing + reasoning) |
 | **Context window usage** | Grows with chain length | Constant per step |
 
-**Key trade-off**: The autonomous pattern has higher per-step LLM costs (routing + goal reasoning), but avoids the context accumulation problem of orchestrators. For long chains or workflows with parallelism opportunities, this trade-off often favours autonomous.
+**Key trade-off**: The orchestrator pattern lets the LLM decide the workflow at runtime, which provides flexibility but results in unpredictable costs and potentially inconsistent results. The autonomous pattern has a fixed handoff chain that's more predictable, though routing and goal reasoning require additional LLM calls at each handoff point.
 
-> **Note**: For concrete performance data with real numbers, we recommend running both patterns with your specific workflows and measuring:
-> - Total LLM calls
-> - Latency (end-to-end time)
-> - Cost (based on your model pricing)
-> - Context token usage
->
-> The relative performance will depend heavily on your specific use case.
+**Benchmark results** (same "search → transcript → summarize → write" workflow):
+- **V1 Orchestrator**: 17-34 LLM calls across runs (variance due to LLM deciding search strategy, whether to skip steps, and delegation phrasing)
+- **V2 Autonomous**: 11 LLM calls consistently (dispatcher routes tasks, agents validate assignments, execution uses direct service calls)
 
 ---
 
@@ -849,7 +1139,7 @@ The meta-pattern here isn't about agents specifically. It's about designing syst
 All patterns described in this series are implemented in the reference codebase:
 
 - **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - Covered in Part 1
-- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_autonomous_agents)** - This post's focus
+- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_goal_agents)** - This post's focus
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
 - **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
 
