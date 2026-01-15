@@ -185,6 +185,49 @@ class PartialResult:
 
 
 @dataclass
+class ValidationResult:
+    """Result of agent validating whether it can handle an assigned task.
+
+    Used in the dispatcher pattern where agents confirm or reject
+    assignments made by the LLMIntentRouter.
+
+    Example - accepting:
+        return ValidationResult.accept()
+
+    Example - rejecting:
+        return ValidationResult.reject(
+            "I handle transcript fetching, not summarization"
+        )
+
+    :param accepted: Whether the agent accepts the assignment
+    :param rejection_reason: Why the agent rejected (if rejected)
+    :param confidence: Agent's confidence in handling this task (0.0-1.0)
+    """
+
+    accepted: bool
+    rejection_reason: str | None = None
+    confidence: float = 1.0
+
+    @classmethod
+    def accept(cls, confidence: float = 1.0) -> "ValidationResult":
+        """Factory method for accepting an assignment.
+
+        :param confidence: How confident the agent is (0.0-1.0)
+        :return: ValidationResult with accepted=True
+        """
+        return cls(accepted=True, confidence=confidence)
+
+    @classmethod
+    def reject(cls, reason: str) -> "ValidationResult":
+        """Factory method for rejecting an assignment.
+
+        :param reason: Why the agent is rejecting this task
+        :return: ValidationResult with accepted=False
+        """
+        return cls(accepted=False, rejection_reason=reason, confidence=0.0)
+
+
+@dataclass
 class OperationTimeout:
     """Context for a timed-out operation, enabling agents to reason about failures.
 

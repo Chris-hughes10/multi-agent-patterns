@@ -13,8 +13,8 @@ from agent_framework.azure import AzureOpenAIChatClient
 from youtube_agent_orchestrator.infra.client import get_chat_client
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.agents.base import BaseAgent
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.agents.base import BaseAgent
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 
 INTENT_ROUTING_PROMPT = """You are a task router for a multi-agent workflow. Route the intent to the FIRST agent needed.
@@ -23,7 +23,7 @@ AVAILABLE AGENTS:
 {agents_text}
 
 INTENT TO ROUTE: "{intent}"
-
+{rejection_context}
 Instructions:
 1. If the intent has MULTIPLE steps (e.g., "get transcripts AND summarize"), choose the FIRST step
 2. The workflow order is typically: search → transcript → summarize → writer
@@ -43,7 +43,7 @@ Agent name:"""
 class IntentRouter(ABC):
     """Abstract interface for routing intents to agents.
 
-    Intent routing is used in the autonomous pattern where agents hand off
+    Intent routing is used in the dispatcher pattern where agents hand off
     work using natural language descriptions rather than capability strings.
 
     Example:
@@ -60,11 +60,15 @@ class IntentRouter(ABC):
         self,
         intent: str,
         registry: "AgentRegistry",
+        excluded_agents: list[str] | None = None,
+        rejection_context: str | None = None,
     ) -> "BaseAgent | None":
         """Find the best agent to handle the given intent.
 
         :param intent: Natural language description of what needs to be done
         :param registry: Agent registry to search
+        :param excluded_agents: Agent names to exclude from consideration (e.g., agents that rejected)
+        :param rejection_context: Context about why previous routing failed (helps LLM make better choice)
         :return: Best matching agent, or None if no suitable agent found
         """
         ...
@@ -94,6 +98,8 @@ class LLMIntentRouter(IntentRouter):
         self,
         intent: str,
         registry: "AgentRegistry",
+        excluded_agents: list[str] | None = None,
+        rejection_context: str | None = None,
     ) -> "BaseAgent | None":
         """Find agent by asking LLM which agent should handle FIRST.
 
@@ -102,10 +108,15 @@ class LLMIntentRouter(IntentRouter):
 
         :param intent: Natural language intent
         :param registry: Agent registry to search
+        :param excluded_agents: Agent names to exclude (e.g., agents that rejected this task)
+        :param rejection_context: Why previous routing failed (helps LLM choose better)
         :return: Best matching agent for the first step, or None
         """
-        # Build agent catalog for the prompt
-        agents = registry.all_agents()
+        # Build agent catalog for the prompt, excluding rejected agents
+        all_agents = registry.all_agents()
+        excluded_set = set(excluded_agents or [])
+        agents = [a for a in all_agents if a.name not in excluded_set]
+
         if not agents:
             return None
 
@@ -116,7 +127,16 @@ class LLMIntentRouter(IntentRouter):
 
         agents_text = "\n".join(agent_descriptions)
 
-        prompt = INTENT_ROUTING_PROMPT.format(agents_text=agents_text, intent=intent)
+        # Build rejection context section if provided
+        rejection_text = ""
+        if rejection_context:
+            rejection_text = f"\nPREVIOUS ROUTING FAILED: {rejection_context}\nChoose a different agent that can handle this.\n"
+
+        prompt = INTENT_ROUTING_PROMPT.format(
+            agents_text=agents_text,
+            intent=intent,
+            rejection_context=rejection_text,
+        )
 
         try:
             response = await self._client.get_response(prompt)
@@ -205,15 +225,20 @@ class CapabilityIntentRouter(IntentRouter):
         self,
         intent: str,
         registry: "AgentRegistry",
+        excluded_agents: list[str] | None = None,
+        rejection_context: str | None = None,
     ) -> "BaseAgent | None":
         """Find agent by matching keywords in intent to capabilities.
 
         :param intent: Natural language intent
         :param registry: Agent registry to search
+        :param excluded_agents: Agent names to exclude from consideration
+        :param rejection_context: Context about why previous routing failed (passed to fallback)
         :return: Best matching agent or None
         """
         intent_lower = intent.lower()
         matched_capabilities: set[str] = set()
+        excluded_set = set(excluded_agents or [])
 
         # Find all capabilities that match keywords in the intent
         for keyword, capabilities in self._keyword_map.items():
@@ -223,19 +248,25 @@ class CapabilityIntentRouter(IntentRouter):
         if not matched_capabilities:
             # No keyword matches - use fallback if available
             if self._fallback:
-                return await self._fallback.find_agent_for_intent(intent, registry)
+                return await self._fallback.find_agent_for_intent(
+                    intent, registry, excluded_agents, rejection_context
+                )
             return None
 
-        # Find agents that have any of the matched capabilities
-        candidates: list[tuple[BaseAgent, int]] = []
+        # Find agents that have any of the matched capabilities (excluding rejected agents)
+        candidates: list[tuple["BaseAgent", int]] = []
         for agent in registry.all_agents():
+            if agent.name in excluded_set:
+                continue
             overlap = len(set(agent.capabilities) & matched_capabilities)
             if overlap > 0:
                 candidates.append((agent, overlap))
 
         if not candidates:
             if self._fallback:
-                return await self._fallback.find_agent_for_intent(intent, registry)
+                return await self._fallback.find_agent_for_intent(
+                    intent, registry, excluded_agents, rejection_context
+                )
             return None
 
         # If exactly one candidate or clear winner, return it
@@ -246,7 +277,9 @@ class CapabilityIntentRouter(IntentRouter):
 
         # Multiple candidates with same score - use fallback for disambiguation
         if candidates[0][1] == candidates[1][1] and self._fallback:
-            return await self._fallback.find_agent_for_intent(intent, registry)
+            return await self._fallback.find_agent_for_intent(
+                intent, registry, excluded_agents, rejection_context
+            )
 
         # Return best match
         return candidates[0][0]
@@ -273,15 +306,21 @@ class CompositeIntentRouter(IntentRouter):
         self,
         intent: str,
         registry: "AgentRegistry",
+        excluded_agents: list[str] | None = None,
+        rejection_context: str | None = None,
     ) -> "BaseAgent | None":
         """Try each router until one finds a match.
 
         :param intent: Natural language intent
         :param registry: Agent registry to search
+        :param excluded_agents: Agent names to exclude from consideration
+        :param rejection_context: Context about why previous routing failed
         :return: First matching agent found, or None
         """
         for router in self._routers:
-            agent = await router.find_agent_for_intent(intent, registry)
+            agent = await router.find_agent_for_intent(
+                intent, registry, excluded_agents, rejection_context
+            )
             if agent is not None:
                 return agent
         return None

@@ -10,15 +10,15 @@ import logging
 
 from youtube_agent_planner.agents.planner import PlannerAgent
 from youtube_agent_planner.infra.dag_executor import DAGExecutor
-from youtube_autonomous_agents.agents import (
+from youtube_goal_agents.agents import (
     SearchAgent,
     SummarizeAgent,
     TranscriptAgent,
     WriterAgent,
 )
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.infra.session import Session
-from youtube_autonomous_agents.models.handoff import PartialResult
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.infra.session import Session
+from youtube_goal_agents.models.handoff import PartialResult
 
 logger = logging.getLogger("youtube_agent_planner.driver")
 

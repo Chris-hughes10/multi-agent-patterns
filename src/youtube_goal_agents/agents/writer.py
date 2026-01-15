@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
 
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.tools.writer import write_markdown_file, write_timestamped_markdown
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
 
 WRITER_INSTRUCTIONS = """You are a Writer Agent. Your job is to export content to markdown files.
 

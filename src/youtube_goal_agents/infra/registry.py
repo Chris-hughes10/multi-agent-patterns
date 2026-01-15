@@ -2,11 +2,11 @@
 
 from typing import TYPE_CHECKING
 
-from youtube_autonomous_agents.infra.task_queue import AsyncTaskQueue
-from youtube_autonomous_agents.models.task import Task
+from youtube_goal_agents.infra.task_queue import AsyncTaskQueue
+from youtube_goal_agents.models.task import Task
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.agents.base import BaseAgent
+    from youtube_goal_agents.agents.base import BaseAgent
 
 
 class AgentRegistry:

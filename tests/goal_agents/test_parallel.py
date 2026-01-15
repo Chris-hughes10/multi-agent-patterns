@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from youtube_autonomous_agents.agents.synthesizer import RequestAnalysis, SynthesizerAgent
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.models.handoff import HandoffResult
+from youtube_goal_agents.agents.synthesizer import RequestAnalysis, SynthesizerAgent
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.models.handoff import HandoffResult
 
 # ============================================================================
 # RequestAnalysis Tests
@@ -199,7 +199,7 @@ class TestAnalyzeRequest:
 
 
 # ============================================================================
-# SelfSelectingPool Fan-Out Tests
+# DispatcherPool Fan-Out Tests
 # ============================================================================
 
 
@@ -234,9 +234,9 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_submit_fan_out_requires_two_intents(self, mock_registry):
         """Test that fan-out requires at least 2 intents."""
-        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
+        from youtube_goal_agents.infra.pool import DispatcherPool
 
-        pool = SelfSelectingPool(mock_registry)
+        pool = DispatcherPool(mock_registry)
 
         result = await pool.submit_fan_out_and_wait(
             intents=["only one"],
@@ -249,9 +249,9 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_submit_fan_out_posts_parallel_tasks(self, mock_registry):
         """Test that fan-out posts multiple tasks to the queue."""
-        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
+        from youtube_goal_agents.infra.pool import DispatcherPool
 
-        pool = SelfSelectingPool(mock_registry)
+        pool = DispatcherPool(mock_registry)
 
         # Mock intent router to avoid LLM calls
         pool._intent_router.find_agent_for_intent = AsyncMock(return_value=None)
@@ -261,7 +261,7 @@ class TestPoolFanOut:
 
         async def mock_wait(task_id, timeout=None):
             # Create a completed task for each parallel task
-            from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
+            from youtube_goal_agents.models import Task, TaskResult, TaskStatus
 
             task = Task(id=task_id, description="test", required_capabilities=[])
             task.status = TaskStatus.COMPLETED
@@ -274,7 +274,7 @@ class TestPoolFanOut:
         # Mock finding join task
         with patch.object(pool, "_find_join_task") as mock_find_join:
             # Create a mock join task
-            from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
+            from youtube_goal_agents.models import Task, TaskResult, TaskStatus
 
             join_task = Task(id="join-123", description="combine", required_capabilities=[])
             join_task.status = TaskStatus.COMPLETED
@@ -293,7 +293,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_task_group_tracking(self):
         """Test that TaskGroup correctly tracks completion."""
-        from youtube_autonomous_agents.infra.pool import TaskGroup
+        from youtube_goal_agents.infra.pool import TaskGroup
 
         group = TaskGroup(
             id="test-group",
@@ -319,7 +319,7 @@ class TestPoolFanOut:
     @pytest.mark.asyncio
     async def test_task_group_handles_errors(self):
         """Test that TaskGroup tracks errors alongside results."""
-        from youtube_autonomous_agents.infra.pool import TaskGroup
+        from youtube_goal_agents.infra.pool import TaskGroup
 
         group = TaskGroup(
             id="test-group",
@@ -381,8 +381,8 @@ class TestParallelIntegration:
     @pytest.mark.asyncio
     async def test_synthesizer_uses_pool_for_parallel(self, mock_registry):
         """Test that Synthesizer delegates parallel execution to pool."""
-        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
-        from youtube_autonomous_agents.models.task import TaskResult
+        from youtube_goal_agents.infra.pool import DispatcherPool
+        from youtube_goal_agents.models.task import TaskResult
 
         mock_client = MagicMock()
         synthesizer = SynthesizerAgent(registry=mock_registry, client=mock_client)
@@ -396,7 +396,7 @@ class TestParallelIntegration:
 
             # Mock pool's submit_fan_out_and_wait
             with patch.object(
-                SelfSelectingPool, "submit_fan_out_and_wait"
+                DispatcherPool, "submit_fan_out_and_wait"
             ) as mock_fan_out:
                 mock_fan_out.return_value = TaskResult(
                     success=True,
@@ -404,8 +404,8 @@ class TestParallelIntegration:
                 )
 
                 # Mock pool start/shutdown
-                with patch.object(SelfSelectingPool, "start"):
-                    with patch.object(SelfSelectingPool, "shutdown"):
+                with patch.object(DispatcherPool, "start"):
+                    with patch.object(DispatcherPool, "shutdown"):
                         # Mock response synthesis
                         with patch.object(
                             synthesizer, "_synthesize_response"
@@ -427,8 +427,8 @@ class TestParallelIntegration:
     @pytest.mark.asyncio
     async def test_synthesizer_uses_pool_for_sequential(self, mock_registry):
         """Test that Synthesizer delegates sequential execution to pool."""
-        from youtube_autonomous_agents.infra.pool import SelfSelectingPool
-        from youtube_autonomous_agents.models.task import TaskResult
+        from youtube_goal_agents.infra.pool import DispatcherPool
+        from youtube_goal_agents.models.task import TaskResult
 
         mock_client = MagicMock()
         synthesizer = SynthesizerAgent(registry=mock_registry, client=mock_client)
@@ -440,15 +440,15 @@ class TestParallelIntegration:
             )
 
             # Mock pool's submit_and_wait
-            with patch.object(SelfSelectingPool, "submit_and_wait") as mock_submit:
+            with patch.object(DispatcherPool, "submit_and_wait") as mock_submit:
                 mock_submit.return_value = TaskResult(
                     success=True,
                     data={"videos": ["video1", "video2"]},
                 )
 
                 # Mock pool start/shutdown
-                with patch.object(SelfSelectingPool, "start"):
-                    with patch.object(SelfSelectingPool, "shutdown"):
+                with patch.object(DispatcherPool, "start"):
+                    with patch.object(DispatcherPool, "shutdown"):
                         # Mock response synthesis
                         with patch.object(
                             synthesizer, "_synthesize_response"

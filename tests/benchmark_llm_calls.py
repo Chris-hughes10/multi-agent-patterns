@@ -203,7 +203,7 @@ async def run_orchestrator_pattern(request: str) -> str:
 
 async def run_autonomous_pattern(request: str, timeout: float = 180.0) -> str:
     """Run the V2 Autonomous pattern."""
-    from youtube_autonomous_agents.cli.main import process_request
+    from youtube_goal_agents.cli.main import process_request
     return await process_request(request, timeout=timeout)
 
 

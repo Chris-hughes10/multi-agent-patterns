@@ -1,4 +1,4 @@
-"""Tests for V2 Self-Selection pattern."""
+"""Tests for V2 Dispatcher Pool pattern."""
 
 import asyncio
 from collections.abc import Callable
@@ -7,10 +7,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.infra.pool import SelfSelectingPool, run_with_self_selection
-from youtube_autonomous_agents.models import Task, TaskResult
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.infra.pool import DispatcherPool, run_with_dispatcher
+from youtube_goal_agents.models import Task, TaskResult
+from youtube_goal_agents.models.handoff import ValidationResult
 
 
 class MockAgent(BaseAgent):
@@ -58,9 +59,13 @@ class MockAgent(BaseAgent):
 
         return TaskResult(success=True, data=f"Executed by {self._name}: {task.description}")
 
+    async def validate_assignment(self, task: Task) -> ValidationResult:
+        """Always accept assignments in mock agent."""
+        return ValidationResult.accept()
 
-class TestSelfSelectingPool:
-    """Tests for SelfSelectingPool."""
+
+class TestDispatcherPool:
+    """Tests for DispatcherPool."""
 
     @pytest.fixture
     def registry(self) -> AgentRegistry:
@@ -72,7 +77,7 @@ class TestSelfSelectingPool:
         agent = MockAgent(registry, name="test", capabilities=["search"])
         registry.register(agent)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -95,7 +100,7 @@ class TestSelfSelectingPool:
         registry.register(search_agent)
         registry.register(summary_agent)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -122,7 +127,7 @@ class TestSelfSelectingPool:
         registry.register(agent1)
         registry.register(agent2)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -146,7 +151,7 @@ class TestSelfSelectingPool:
         agent = MockAgent(registry, name="writer", capabilities=["file_export"])
         registry.register(agent)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -167,7 +172,7 @@ class TestSelfSelectingPool:
         agent = MockAgent(registry, name="failing", capabilities=["test"], should_fail=True)
         registry.register(agent)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -191,7 +196,7 @@ class TestSelfSelectingPool:
         registry.register(agent1)
         registry.register(agent2)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:
@@ -222,7 +227,7 @@ class TestSelfSelectingPool:
         agent = MockAgent(registry, name="test", capabilities=["test"])
         registry.register(agent)
 
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         assert pool.active_watcher_count == 1
@@ -233,32 +238,40 @@ class TestSelfSelectingPool:
         assert pool.is_running is False
 
 
-class TestRunWithSelfSelection:
-    """Tests for run_with_self_selection convenience function."""
+class TestRunWithDispatcher:
+    """Tests for run_with_dispatcher convenience function."""
 
-    async def test_run_with_self_selection_executes_task(self) -> None:
+    async def test_run_with_dispatcher_executes_task(self) -> None:
         """Test the convenience function runs a single task end-to-end."""
+        from unittest.mock import AsyncMock, patch
+
         registry = AgentRegistry()
         agent = MockAgent(registry, name="test", capabilities=["search"])
         registry.register(agent)
 
-        result = await run_with_self_selection(
-            registry=registry,
-            description="Single task",
-            capabilities=["search"],
-            timeout=5.0,
-        )
+        # Mock the LLM router to return our test agent
+        with patch(
+            "youtube_goal_agents.infra.pool.LLMIntentRouter.find_agent_for_intent",
+            new_callable=AsyncMock,
+            return_value=agent,
+        ):
+            result = await run_with_dispatcher(
+                registry=registry,
+                description="Single task",
+                capabilities=["search"],
+                timeout=5.0,
+            )
 
         assert result.success is True
         assert "Executed by test" in result.data
 
 
-class TestSelfSelectionWithRealAgents:
+class TestDispatcherPoolWithRealAgents:
     """Integration tests with real V2 agent classes (mocked tools)."""
 
-    async def test_registry_with_all_v2_agents_self_selection(self) -> None:
-        """Test that all V2 agents work with self-selection pattern."""
-        from youtube_autonomous_agents.agents import (
+    async def test_registry_with_all_v2_agents_dispatcher_pattern(self) -> None:
+        """Test that all V2 agents work with dispatcher pattern."""
+        from youtube_goal_agents.agents import (
             SearchAgent,
             SummarizeAgent,
             TranscriptAgent,
@@ -282,7 +295,7 @@ class TestSelfSelectionWithRealAgents:
         registry.register(writer)
 
         # Create pool and verify agents are watching
-        pool = SelfSelectingPool(registry)
+        pool = DispatcherPool(registry)
         await pool.start()
 
         try:

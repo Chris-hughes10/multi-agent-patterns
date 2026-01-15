@@ -5,7 +5,7 @@ import logging
 
 import click
 
-from youtube_autonomous_agents.cli.main import (
+from youtube_goal_agents.cli.main import (
     create_synthesizer,
     list_agents,
     process_request,
@@ -16,20 +16,20 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("youtube_autonomous_agents.cli")
+logger = logging.getLogger("youtube_goal_agents.cli")
 
 
 @click.group()
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
 def cli(verbose: bool) -> None:
-    """YouTube Autonomous Agents - Multi-agent task processing.
+    """YouTube Goal-Aware Agents - Multi-agent task processing.
 
     Uses the SynthesizerAgent as the entry point for all requests.
     The Synthesizer analyzes requests, coordinates agents via the
-    self-selecting pool, and synthesizes final responses.
+    dispatcher pool, and synthesizes final responses.
     """
     if verbose:
-        logging.getLogger("youtube_autonomous_agents").setLevel(logging.DEBUG)
+        logging.getLogger("youtube_goal_agents").setLevel(logging.DEBUG)
 
 
 @cli.command()

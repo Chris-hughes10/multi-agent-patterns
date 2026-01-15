@@ -6,17 +6,15 @@
 
 In Parts 1 and 2, we explored *who* coordinates multi-agent workflows: a central orchestrator (V1) versus distributed autonomous agents (V2). The autonomous pattern was elegant - agents reasoning about goals and handing off to each other - but it revealed an interesting trade-off.
 
-Every agent in V2 needs to reason about the user's goal. That's a lot of LLM calls:
+Every agent in V2 needs to reason about the user's goal. In our benchmark workflow ("search → fetch transcripts → summarize → write"), this adds up:
 
 ```
-V2 Autonomous Pattern:
-  Initial routing: 1 LLM call
-  Agent A execution + goal reasoning: 2 LLM calls
-  Routing to Agent B: 1 LLM call
-  Agent B execution + goal reasoning: 2 LLM calls
-  ...
+V2 Autonomous Pattern (actual benchmark):
+  Dispatcher routing (4 handoffs):    4 LLM calls
+  Agent validation (4 agents):        4 LLM calls
+  Agent execution reasoning:          3 LLM calls
 
-Total for 3-step workflow: ~9 LLM calls
+Total: 11 LLM calls (zero variance across runs)
 ```
 
 When every agent needs to think, you need capable models throughout. That gets expensive.
@@ -30,66 +28,55 @@ This led us to explore a different dimension: **What if we front-load the intell
 - How the Planner pattern *enables* strategic model selection
 - Implementing DAG-based execution with dependency tracking
 - When predictability matters more than adaptability
-- Tradeoffs between the three patterns we've explored
+- Trade-offs between the three patterns we've explored
 
 ---
 
 ## The Cost Structure Problem
 
-### V1 Orchestrator Costs
+### V1 Orchestrator Costs (actual benchmark: 17-34 calls)
+
+The orchestrator pattern shows **high variance** because the LLM decides the workflow at runtime:
 
 ```
-Request: "Find videos about Python asyncio, get transcript, summarize"
+V1 Orchestrator Pattern (Run A - 17 calls, minimal approach):
+  Orchestrator: "I'll search both channels"        → 2 SearchAgent calls
+  Orchestrator: "Now fetch transcripts"            → 3 TranscriptAgent calls
+  Orchestrator: "Writer can synthesize directly"   → 1 WriterAgent call
+  Plus orchestrator decision overhead:             ~11 LLM calls
 
-Orchestrator decides what to do: 1 LLM call (powerful model)
-  ↓ delegates to SearchAgent
-SearchAgent executes: 1 LLM call (can be cheaper model - just searching)
-  ↓ returns to orchestrator
-Orchestrator decides next step: 1 LLM call (powerful model)
-  ↓ delegates to TranscriptAgent
-TranscriptAgent executes: 1 LLM call (can be cheaper model - just fetching)
-  ↓ returns to orchestrator
-Orchestrator decides final step: 1 LLM call (powerful model)
-  ↓ delegates to SummarizeAgent
-SummarizeAgent executes: 1 LLM call (needs capable model for summarization)
+V1 Orchestrator Pattern (Run B - 34 calls, thorough approach):
+  Orchestrator: "I'll do three targeted searches"  → 3 SearchAgent calls
+  Orchestrator: "Fetch all transcripts"            → 5 TranscriptAgent calls
+  Orchestrator: "Summarize each, then combine"     → 4 SummarizeAgent calls
+  Orchestrator: "Write the final document"         → 1 WriterAgent call
+  Plus orchestrator decision overhead:             ~21 LLM calls
+```
 
-Total: 6 LLM calls (3 powerful for decisions, 3 mixed for execution)
+Same request, different runtime decisions, 2× cost difference.
+
+**Cost characteristics:**
+- Orchestrator decides *scope* at runtime (how many searches? skip summarization?)
+- Each decision point is an LLM call
+- Context accumulates at orchestrator (token costs grow with chain length)
+- **Unpredictable costs** - you don't know until it runs
+
+### V2 Autonomous Costs (actual benchmark: 11 calls, zero variance)
+
+```
+V2 Autonomous Pattern (consistent across all runs):
+  Dispatcher routing (4 handoffs):    4 LLM calls
+  Agent validation (4 agents):        4 LLM calls
+  Agent execution reasoning:          3 LLM calls
+
+Total: 11 LLM calls (zero variance across runs)
 ```
 
 **Cost characteristics:**
-- Central decision-making requires powerful model
-- Execution can sometimes use cheaper models
-- Context accumulates at orchestrator (token costs grow)
-
-### V2 Autonomous Costs
-
-```
-Same request: "Find videos about Python asyncio, get transcript, summarize"
-
-Router analyzes intent: 1 LLM call (powerful model)
-  ↓ routes to SearchAgent
-SearchAgent searches: 1 LLM call (needs capable model)
-SearchAgent reasons about goal: 1 LLM call (needs capable model)
-  ↓ hands off with intent
-Router analyzes new intent: 1 LLM call (powerful model)
-  ↓ routes to TranscriptAgent
-TranscriptAgent fetches: 1 LLM call (capable model)
-TranscriptAgent reasons about goal: 1 LLM call (capable model)
-  ↓ hands off with intent
-Router analyzes final intent: 1 LLM call (powerful model)
-  ↓ routes to SummarizeAgent
-SummarizeAgent summarizes: 1 LLM call (capable model needed)
-SummarizeAgent reasons about goal: 1 LLM call (capable model)
-  ↓ completes
-
-Total: 10 LLM calls (all need capable models for reasoning)
-```
-
-**Cost characteristics:**
-- Every agent needs to reason about the goal
-- Can't easily substitute cheaper models (reasoning quality matters)
-- State flows forward (lower context costs than V1)
-- Higher per-step costs, but more parallelizable
+- Centralized dispatcher routes tasks (1 LLM call per handoff)
+- Agents validate assignments (1 LLM call per agent)
+- Execution uses direct service calls where possible
+- **Predictable costs** - 11 calls for every request
 
 ### The Economic Insight
 
@@ -121,19 +108,24 @@ Step 2 → Agent B (cheaper model - just execute)
 Step 3 → Agent C (capable model if needed for task complexity)
 ```
 
-**Cost structure:**
+**Cost structure (actual benchmark: 3 calls, zero variance):**
 ```
-Same request: "Find videos about Python asyncio, get transcript, summarize"
+V3 Planner Pattern (consistent across all runs):
+  PlannerAgent creates DAG:           1 LLM call
+  Search execution:                   0 LLM calls (direct YouTube API call)
+  Transcript fetching:                0 LLM calls (direct service call)
+  Summarization × 2:                  2 LLM calls (requires reasoning)
+  File writing:                       0 LLM calls (direct file I/O)
 
-Planning: 1 LLM call (powerful model - creates full DAG)
-
-Execution:
-  SearchAgent executes "search Python asyncio": 1 call (cheap model OK)
-  TranscriptAgent executes "fetch transcript": 1 call (cheap model OK)
-  SummarizeAgent executes "summarize key concepts": 1 call (capable model needed)
-
-Total: 4 LLM calls (1 powerful + 2 cheap + 1 capable)
+Total: 3 LLM calls (zero variance across runs)
 ```
+
+**Why so efficient?** The key insight is that most workflow steps don't need LLM reasoning:
+- **Search**: Just call the YouTube API with parameters from the plan
+- **Transcript**: Just fetch from YouTube's transcript service
+- **File writing**: Just write the formatted output to disk
+
+Only **summarization** requires an LLM to reason about content. Everything else is mechanical execution of the plan. This is why V3 uses 80% fewer LLM calls than V2.
 
 ### What You Get
 
@@ -367,21 +359,61 @@ While our reference implementation doesn't implement model tier selection (all a
 
 ### Cost Analysis
 
-| Pattern | LLM Calls* | Why |
-|---------|-----------|-----|
-| **V1 Orchestrator** | ~7 | Efficient hub-and-spoke: orchestrator + sub-agents complete quickly |
-| **V2 Autonomous** | ~31 | Most expensive: routing + goal reasoning at every step |
-| **V3 Planner+DAG** | ~8 | Single planning call, then mechanical execution via direct service calls |
+| Pattern | LLM Calls* | Variance | Why |
+|---------|-----------|----------|-----|
+| **V1 Orchestrator** | 17-34 | **High** | LLM decides workflow at runtime - unpredictable |
+| **V2 Autonomous** | 11 | **None** | Dispatcher routes + agents validate, then execute via direct service calls |
+| **V3 Planner+DAG** | ~3 | **None** | Single planning call, then mechanical execution via direct service calls |
 
-*Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation. Actual numbers vary based on workflow complexity and model behavior.*
+*Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation. Numbers are based on multiple benchmark runs.*
 
-The surprise here: **V1 and V3 are comparably efficient**, while V2 is significantly more expensive.
+The key insight here is **predictability, not just efficiency**.
 
-Why is V2 so expensive? The autonomous pattern adds two LLM calls at every handoff: routing (which agent handles this intent?) and goal reasoning (is the user's goal satisfied?). These extra reasoning steps enable adaptability but multiply costs. A 4-step workflow becomes 8+ decision points.
+**V1 Orchestrator breakdown (17-34 calls):**
+The orchestrator makes LLM calls at each decision point, plus each sub-agent makes its own calls. The variance comes from runtime decisions:
 
-V1 is efficient because the orchestrator makes decisions centrally - it doesn't need to reason about routing or goal satisfaction at each sub-agent.
+| Decision Point | Observed Variance |
+|----------------|-------------------|
+| Search strategy | 1-3 searches, sequential or parallel |
+| Step skipping | Summarization sometimes skipped entirely |
+| Delegation phrasing | Different wording affects sub-agent behaviour |
 
-V3 matches V1's efficiency through upfront planning: one LLM call creates the full workflow, then execution is mechanical. The key difference from V1 is **predictability** - you know the LLM budget before execution starts, and you can inspect the plan before running it.
+With verbose logging enabled (`-v` flag), we can see these decisions in action:
+
+```
+# Run A (17 calls) - Minimal approach, skips summarization
+SearchAgent called with: Kamado pork loin Fork and Embers
+SearchAgent called with: Chuds BBQ pork loin kamado
+TranscriptAgent called with: Fetch transcript for video FsbwQI-EI-k...
+TranscriptAgent called with: Fetch transcript for video 2AF1ysZ8eEA...
+TranscriptAgent called with: Fetch transcript for video fI86yXKlnQA...
+WriterAgent called with: Write a markdown file...  # No SummarizeAgent!
+
+# Run B (25 calls) - Thorough approach with summarization
+SearchAgent called with: Find YouTube videos where Fork and Embers...
+SearchAgent called with: Find YouTube videos where Chuds BBQ...
+SearchAgent called with: Find top YouTube videos about cooking pork loin...
+TranscriptAgent called with: ...
+SummarizeAgent called with: From the provided transcripts, extract...
+WriterAgent called with: ...
+```
+
+Run A decided the WriterAgent could synthesize directly from transcripts. Run B added a summarization step. Both produced valid outputs, but with different costs.
+
+**V2 Autonomous breakdown (11 calls, consistent):**
+The dispatcher pattern centralizes routing decisions:
+- Dispatcher routing: 4 calls (one per handoff in the chain)
+- Agent validation: 4 calls (each agent confirms assignment)
+- Execution reasoning: 3 calls (goal reasoning where needed)
+
+In benchmark testing, V2 produced **exactly 11 calls across all runs with zero variance**. Why? The dispatcher routes each task to a specific agent (1 LLM call), the agent validates the assignment (1 LLM call), then executes using direct service calls where possible. Only steps requiring actual reasoning (like summarization) use additional LLM calls during execution.
+
+**V3 Planner breakdown (~3 calls):**
+- PlannerAgent: 1 call (creates the complete DAG upfront)
+- Summarization: 2 calls (only step requiring LLM reasoning)
+- All other execution: 0 LLM calls (direct service calls)
+
+Search, transcript fetching, and file writing are executed mechanically via direct service calls - no LLM reasoning needed. Only summarization requires LLM involvement during execution. This is why V3 is dramatically more efficient: it front-loads all reasoning into the planning phase.
 
 ### When to Use Each Pattern
 
@@ -462,7 +494,7 @@ We've now explored multi-agent coordination across three dimensions:
 
 ---
 
-## Limitations and Tradeoffs
+## Limitations and Trade-offs
 
 ### What Planner+DAG Can't Do Well
 
@@ -598,7 +630,7 @@ Autonomous agents (V2) are elegant, but every agent needs to reason about the go
 
 The Planner pattern lets you be strategic: use a powerful model once to create a complete plan, then execute the plan with reduced per-step overhead. For high-volume scenarios, this can significantly reduce costs compared to autonomous agents.
 
-But it's a tradeoff: you sacrifice the adaptability that makes autonomous agents powerful. The workflow can't change course based on what it finds. If that adaptability matters more than cost, autonomous agents are still the right choice.
+But it's a trade-off: you sacrifice the adaptability that makes autonomous agents powerful. The workflow can't change course based on what it finds. If that adaptability matters more than cost, autonomous agents are still the right choice.
 
 **The Three Patterns, Summarized:**
 
@@ -626,7 +658,7 @@ Multi-agent systems aren't mysterious. They're software systems with clear archi
 All patterns described in this series are implemented in the reference codebase:
 
 - **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - Covered in Part 1
-- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_autonomous_agents)** - Covered in Part 2
+- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_goal_agents)** - Covered in Part 2
 - **[V3 Planner+DAG Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_planner)** - This post's focus
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
 - **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides

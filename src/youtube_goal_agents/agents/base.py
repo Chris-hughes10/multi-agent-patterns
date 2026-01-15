@@ -9,7 +9,7 @@ from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIChatClient
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
-from youtube_autonomous_agents.models.task import (
+from youtube_goal_agents.models.task import (
     MaxDepthExceededError,
     Task,
     TaskResult,
@@ -17,11 +17,12 @@ from youtube_autonomous_agents.models.task import (
 )
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
-    from youtube_autonomous_agents.models.handoff import (
+    from youtube_goal_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.models.handoff import (
         HandoffResult,
         OperationTimeout,
         PartialResult,
+        ValidationResult,
     )
 
 T = TypeVar("T")
@@ -119,61 +120,80 @@ class BaseAgent(ABC):
         Routing priority:
         1. LLM-routed tasks: Check if we're the target agent (routed_to field)
         2. Capability-based: Check if our capabilities match required_capabilities
-        3. Intent-based fallback: Use keyword matching (legacy)
+
+        All tasks should be routed through the LLMIntentRouter (dispatcher pattern).
+        Capability-based routing is a fallback for direct task submission.
 
         :param task: Task to check
         :return: True if agent can handle the task
         """
-        # Priority 1: LLM-routed handoff tasks
+        # Priority 1: LLM-routed tasks (dispatcher pattern)
         # If the task was routed by LLM, only the target agent can handle it
         routed_to = task.context.get("routed_to")
         if routed_to is not None:
             return routed_to == self.name
 
-        # Priority 2: Capability-based routing
+        # Priority 2: Capability-based routing (fallback)
         if task.required_capabilities:
             return any(cap in self.capabilities for cap in task.required_capabilities)
 
-        # Priority 3: Intent-based fallback (for unrouted handoffs)
-        intent = task.context.get("intent", "")
-        if intent:
-            return self._can_handle_intent(intent)
-
         return False
 
-    def _can_handle_intent(self, intent: str) -> bool:
-        """Check if this agent can handle a natural language intent.
+    async def validate_assignment(self, task: Task) -> "ValidationResult":
+        """Validate whether this agent should handle the assigned task.
 
-        Uses keyword matching against capabilities and description.
-        Override for more sophisticated intent matching.
+        Called after the dispatcher routes a task to this agent. The agent
+        uses LLM reasoning to confirm or reject the assignment.
 
-        :param intent: Natural language intent from handoff
-        :return: True if this agent should handle the intent
+        Override for custom validation logic.
+
+        :param task: Task that was routed to this agent
+        :return: ValidationResult with accepted=True or rejection reason
         """
-        intent_lower = intent.lower()
+        from youtube_goal_agents.models.handoff import ValidationResult
 
-        # Map common intent keywords to capabilities
-        intent_keywords = {
-            "transcript": ["transcript", "captions", "spoken words", "text from video"],
-            "summarize": ["summarize", "summary", "key points", "extract", "analyze"],
-            "search": ["search", "find videos", "look for"],
-            "write": ["write", "save", "export", "file"],
-        }
+        intent = task.context.get("intent", task.description)
 
-        for capability in self.capabilities:
-            # Direct capability match
-            if capability.replace("_", " ") in intent_lower:
-                return True
+        prompt = f"""You are the {self.name} agent. Your role: {self.description}
 
-            # Check capability-specific keywords
-            cap_base = capability.split("_")[0]  # e.g., "youtube_search" -> "youtube"
-            if cap_base in intent_keywords and any(
-                kw in intent_lower for kw in intent_keywords[cap_base]
-            ):
-                return True
+A task has been routed to you:
+INTENT: "{intent}"
 
-        # Also check against agent name
-        return self.name in intent_lower
+Should you handle this task?
+- Answer YES if this task matches your capabilities and role
+- Answer NO if this task should be handled by a different agent
+
+Respond in this exact format:
+DECISION: YES or NO
+REASON: Brief explanation (1 sentence)"""
+
+        try:
+            response = await self._call_with_timeout_or_raise(
+                self._client.get_response(prompt),
+                operation="validate_assignment",
+                timeout=10.0,  # Quick validation
+            )
+
+            response_text = response.text.strip().upper()
+
+            # Parse response
+            if "DECISION: YES" in response_text or response_text.startswith("YES"):
+                return ValidationResult.accept()
+            elif "DECISION: NO" in response_text or response_text.startswith("NO"):
+                # Extract reason if present
+                reason = f"{self.name} rejected: task doesn't match my role"
+                if "REASON:" in response_text:
+                    reason_part = response_text.split("REASON:")[-1].strip()
+                    if reason_part:
+                        reason = reason_part
+                return ValidationResult.reject(reason)
+            else:
+                # Ambiguous response - accept to avoid blocking
+                return ValidationResult.accept(confidence=0.5)
+
+        except TimeoutError:
+            # On timeout, accept to avoid blocking the workflow
+            return ValidationResult.accept(confidence=0.5)
 
     def _get_chat_agent(self) -> ChatAgent:
         """Get or create the underlying ChatAgent.
@@ -225,7 +245,7 @@ class BaseAgent(ABC):
         :param retryable: Whether this operation could be retried
         :return: The coroutine result, or OperationTimeout if timed out
         """
-        from youtube_autonomous_agents.models.handoff import OperationTimeout
+        from youtube_goal_agents.models.handoff import OperationTimeout
 
         effective_timeout = timeout if timeout is not None else self._llm_timeout
 
@@ -310,7 +330,7 @@ class BaseAgent(ABC):
         :param state: Accumulated results from previous agents
         :return: HandoffResult or PartialResult on error
         """
-        from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
+        from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
 
         task = Task(
             description=goal,

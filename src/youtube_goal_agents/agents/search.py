@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
 
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.youtube import search_youtube
 from youtube_agent_orchestrator.tools.youtube import search_youtube_structured
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
-from youtube_autonomous_agents.models.task import Task, TaskResult, TaskStatus
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
+from youtube_goal_agents.models.task import Task, TaskResult, TaskStatus
 
 logger = logging.getLogger(__name__)
 

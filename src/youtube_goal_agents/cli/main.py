@@ -8,16 +8,16 @@ This module provides the core driver functions that can be used by:
 
 import logging
 
-from youtube_autonomous_agents.agents import (
+from youtube_goal_agents.agents import (
     SearchAgent,
     SummarizeAgent,
     SynthesizerAgent,
     TranscriptAgent,
     WriterAgent,
 )
-from youtube_autonomous_agents.infra import AgentRegistry
+from youtube_goal_agents.infra import AgentRegistry
 
-logger = logging.getLogger("youtube_autonomous_agents.driver")
+logger = logging.getLogger("youtube_goal_agents.driver")
 
 
 def create_registry() -> AgentRegistry:

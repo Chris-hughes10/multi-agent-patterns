@@ -19,10 +19,10 @@ from youtube_agent_planner.infra.dag_executor import (
     ExecutionDAG,
     StepStatus,
 )
-from youtube_autonomous_agents.infra.registry import AgentRegistry
-from youtube_autonomous_agents.infra.session import Session
-from youtube_autonomous_agents.models import TaskResult
-from youtube_autonomous_agents.models.handoff import PartialResult
+from youtube_goal_agents.infra.registry import AgentRegistry
+from youtube_goal_agents.infra.session import Session
+from youtube_goal_agents.models import TaskResult
+from youtube_goal_agents.models.handoff import PartialResult
 
 # ============================================================================
 # ExecutionDAG Tests

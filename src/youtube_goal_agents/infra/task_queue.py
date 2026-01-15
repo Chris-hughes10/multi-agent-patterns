@@ -4,15 +4,15 @@ import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.models.task import Task
+    from youtube_goal_agents.models.task import Task
 
 
 class AsyncTaskQueue:
     """Thread-safe async task queue with claim support.
 
     Supports two modes of operation:
-    1. Simple get/put for dispatcher pattern
-    2. Peek/claim for self-selection pattern where agents compete for tasks
+    1. Simple get/put for dispatcher pattern (primary)
+    2. Peek/claim for competitive task claiming (optional)
 
     :ivar _queue: Internal asyncio queue for task ordering
     :ivar _pending: Dict of task_id -> Task for quick lookup
@@ -66,7 +66,7 @@ class AsyncTaskQueue:
     async def peek(self) -> "Task | None":
         """Peek at the next unclaimed task without consuming it.
 
-        Used by self-selection pattern - agents check what's available.
+        Used for competitive claiming - agents check what's available.
 
         :return: Next unclaimed task or None
         """
@@ -79,7 +79,7 @@ class AsyncTaskQueue:
     async def try_claim(self, task_id: str, agent_name: str) -> bool:
         """Atomically try to claim a task for an agent.
 
-        Used by self-selection pattern - agents compete to claim tasks.
+        Used for competitive claiming - agents compete to claim tasks.
 
         :param task_id: ID of task to claim
         :param agent_name: Name of agent claiming the task

@@ -3,14 +3,15 @@
 Pure data structures with minimal behavior (validation only).
 """
 
-from youtube_autonomous_agents.models.handoff import (
+from youtube_goal_agents.models.handoff import (
     AgentReasoning,
     HandoffResult,
     OperationTimeout,
     PartialResult,
     RequestAnalysis,
+    ValidationResult,
 )
-from youtube_autonomous_agents.models.task import (
+from youtube_goal_agents.models.task import (
     MaxDepthExceededError,
     Task,
     TaskResult,
@@ -29,4 +30,5 @@ __all__ = [
     "PartialResult",
     "OperationTimeout",
     "RequestAnalysis",
+    "ValidationResult",
 ]

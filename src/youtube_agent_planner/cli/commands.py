@@ -10,9 +10,9 @@ import click
 
 from youtube_agent_planner.cli.main import create_planner, create_registry
 from youtube_agent_planner.infra.dag_executor import DAGExecutor
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.infra.session import Session
-from youtube_autonomous_agents.models.handoff import PartialResult
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.infra.session import Session
+from youtube_goal_agents.models.handoff import PartialResult
 
 # Configure logging
 logging.basicConfig(
@@ -96,7 +96,7 @@ def cli(verbose: bool) -> None:
     """
     if verbose:
         logging.getLogger("youtube_agent_planner").setLevel(logging.DEBUG)
-        logging.getLogger("youtube_autonomous_agents").setLevel(logging.DEBUG)
+        logging.getLogger("youtube_goal_agents").setLevel(logging.DEBUG)
 
 
 @cli.command()

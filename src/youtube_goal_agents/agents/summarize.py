@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
 
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.summarizer import TranscriptSummarizer
 from youtube_agent_orchestrator.tools.summarize import summarize_stored_transcript, summarize_text
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
-from youtube_autonomous_agents.models.task import Task, TaskResult, TaskStatus
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
+from youtube_goal_agents.models.task import Task, TaskResult, TaskStatus
 
 SUMMARIZE_INSTRUCTIONS = """You are a Summarization Agent. Your job is to create concise, informative summaries of transcripts and text.
 
@@ -132,29 +132,6 @@ class SummarizeAgent(BaseAgent):
     def _get_tools(self) -> list[Callable[..., Any]]:
         """Return summarization tools from V1."""
         return [summarize_stored_transcript, summarize_text]
-
-    def _can_handle_intent(self, intent: str) -> bool:
-        """Check if this agent can handle a natural language intent.
-
-        Override to explicitly match summarize/analyze intents.
-
-        :param intent: Natural language intent from handoff
-        :return: True if this agent should handle the intent
-        """
-        intent_lower = intent.lower()
-
-        # Accept summarize/analyze intents
-        summarize_keywords = [
-            "summarize",
-            "summary",
-            "key points",
-            "analyze",
-            "extract",
-            "main ideas",
-            "condense",
-            "highlight",
-        ]
-        return any(kw in intent_lower for kw in summarize_keywords)
 
     async def execute(self, task: Task) -> TaskResult:
         """Execute summarization task and return structured results.

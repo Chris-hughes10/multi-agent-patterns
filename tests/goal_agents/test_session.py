@@ -2,7 +2,7 @@
 
 import pytest
 
-from youtube_autonomous_agents.infra.session import Session, SessionEntry
+from youtube_goal_agents.infra.session import Session, SessionEntry
 
 
 class TestSession:

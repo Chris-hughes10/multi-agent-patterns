@@ -4,7 +4,7 @@ Detects cyclic handoff patterns to prevent infinite loops when agents
 hand off work to each other.
 """
 
-from youtube_autonomous_agents.infra.session import ExecutionStep
+from youtube_goal_agents.infra.session import ExecutionStep
 
 
 class LoopDetector:

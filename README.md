@@ -225,9 +225,9 @@ The orchestrator coordinates four specialized agents:
 
 See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural decisions.
 
-## V2: Autonomous Multi-Agent System
+## V2: Goal-Aware Multi-Agent System
 
-YouTube Agent V2 (`youtube-autonomous`) uses **autonomous agents with event-driven self-selection** - a unified coordination pattern where agents reason about goals and hand off work via a shared queue.
+YouTube Agent V2 (`youtube-autonomous`) uses **goal-aware agents with dispatcher-based routing** - an LLM router assigns tasks, but agents can validate and reject assignments with reasoning.
 
 ### How It Works
 
@@ -242,9 +242,10 @@ YouTube Agent V2 (`youtube-autonomous`) uses **autonomous agents with event-driv
 └────────────────────────┬────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────────────┐
-│              Event-Driven Task Queue                    │
+│              LLM Intent Router (Dispatcher)             │
+│         (routes task to best agent for intent)          │
 └────────────────────────┬────────────────────────────────┘
-                         │ (agents notified instantly)
+                         │
        ┌─────────────────┼─────────────────┐
        ↓                 ↓                 ↓
   ┌─────────┐      ┌───────────┐     ┌─────────┐
@@ -252,20 +253,20 @@ YouTube Agent V2 (`youtube-autonomous`) uses **autonomous agents with event-driv
   └────┬────┘      └─────┬─────┘     └────┬────┘
        └─────────────────┴────────────────┘
                          ↓
-              can_handle? → claim → execute
+              validate → accept/reject → execute
                          ↓
               ┌──────────┴──────────┐
               │                     │
            complete            handoff
               ↓                     ↓
            DONE              Post new task
-                             (loop continues)
+                             (re-route if rejected)
 ```
 
 **Key features:**
-- **Event-driven queue**: Zero CPU usage when idle (no polling)
-- **Self-selection**: Agents compete to claim tasks they can handle
-- **Autonomous handoffs**: Agents reason about the goal and hand off to the next agent
+- **Dispatcher + confirmation**: LLM routes tasks, agents validate before executing
+- **Agent rejection with re-routing**: Mis-routed tasks get re-assigned with context
+- **Goal-aware handoffs**: Agents reason about user's goal, hand off to continue chain
 - **State accumulation**: Context builds up as the chain progresses
 
 ### Quick Start
@@ -311,9 +312,9 @@ The planner creates an execution DAG upfront with dependency tracking and parall
 
 ### V1 vs V2
 
-| Aspect | V1 Orchestrator | V2 Autonomous |
+| Aspect | V1 Orchestrator | V2 Goal-Aware |
 |--------|-----------------|---------------|
-| **Control** | LLM decides every step | Agents self-coordinate via queue |
+| **Control** | LLM decides every step | Dispatcher routes, agents validate |
 | **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
 | **Command** | `youtube-agent` | `youtube-autonomous` |
 

@@ -16,7 +16,7 @@ from youtube_agent_orchestrator.infra.client import get_chat_client
 from youtube_agent_planner.infra.dag_executor import DAGStep, ExecutionDAG
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 logger = logging.getLogger("youtube_agent_planner.planner")
 

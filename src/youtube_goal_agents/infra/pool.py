@@ -1,14 +1,17 @@
-"""Self-selection pattern - Agents autonomously claim tasks from queue.
+"""Dispatcher pattern - LLM routes tasks to agents with confirmation.
 
-This pattern combines event-driven task notification with autonomous agent
-handoffs. Agents wait for queue notifications (zero CPU when idle), claim
-tasks they can handle, execute with goal reasoning, and post handoffs back
-to the queue for chaining.
+This pattern uses a central LLMIntentRouter (dispatcher) to route tasks
+to the most appropriate agent. Agents can validate and reject assignments,
+enabling self-correction when routing is incorrect.
 
-Supports parallel fan-out/fan-in:
-- Any agent can return HandoffResult.fan_out() with multiple intents
-- Pool tracks task groups and posts join task when all complete
-- Enables decentralized parallel execution without central coordination
+Key features:
+- LLM-based intent routing for all tasks (initial and handoffs)
+- Agent validation/rejection with automatic re-routing
+- Event-driven task notification (zero CPU when idle)
+- Parallel fan-out/fan-in with TaskGroup tracking
+
+This pattern is "goal-aware" - agents understand the user's intent and
+can reason about whether they're the right agent for a task.
 """
 
 import asyncio
@@ -17,15 +20,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from youtube_autonomous_agents.infra.intent_router import LLMIntentRouter
-from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
-from youtube_autonomous_agents.models.handoff import HandoffResult
+from youtube_goal_agents.infra.intent_router import LLMIntentRouter
+from youtube_goal_agents.models import Task, TaskResult, TaskStatus
+from youtube_goal_agents.models.handoff import HandoffResult, ValidationResult
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.agents.base import BaseAgent
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.agents.base import BaseAgent
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
-logger = logging.getLogger("youtube_autonomous_agents.self_selection")
+logger = logging.getLogger("youtube_goal_agents.dispatcher")
 
 
 @dataclass
@@ -83,24 +86,28 @@ class TaskGroup:
             return None
 
 
-class SelfSelectingPool:
-    """Pool where agents autonomously watch and claim tasks.
+class DispatcherPool:
+    """Pool where a dispatcher routes tasks to agents with confirmation.
 
-    The self-selection pattern provides decentralized task assignment:
-    1. Each agent runs its own watcher coroutine
-    2. Agents wait for queue notifications (event-driven, zero CPU when idle)
-    3. Agents compete to claim tasks they can handle
-    4. First agent to claim a task executes it
-    5. If agent returns a handoff, a new task is posted to the queue
+    The dispatcher pattern provides centralized routing with agent validation:
+    1. LLMIntentRouter determines which agent should handle each task
+    2. Each agent runs its own watcher coroutine
+    3. Agents claim tasks routed to them (deterministic, not competitive)
+    4. Agents validate assignments and can reject with reason
+    5. Rejected tasks are re-routed to different agents
+    6. Handoffs go through the dispatcher for intelligent routing
 
     This pattern is good for:
-    - Scalable systems with many agents
-    - Natural load balancing (busy agents claim fewer tasks)
-    - Autonomous agent behavior with goal reasoning
-    - Chained handoffs via queue
+    - Semantic understanding of task intents
+    - Self-correcting routing via agent rejection
+    - Goal-aware agents that understand their role
+    - Chained handoffs with LLM-based routing decisions
 
     :param registry: AgentRegistry with registered agents
     """
+
+    # Maximum routing attempts before failing a task
+    MAX_ROUTING_ATTEMPTS = 3
 
     def __init__(self, registry: "AgentRegistry") -> None:
         """Initialize pool with an agent registry.
@@ -112,7 +119,7 @@ class SelfSelectingPool:
         self._results: dict[str, TaskResult] = {}
         self._shutdown = asyncio.Event()
         self._watcher_timeout: float = 0.5  # Timeout for event wait (allows shutdown checks)
-        self._intent_router = LLMIntentRouter()  # For intelligent handoff routing
+        self._intent_router = LLMIntentRouter()  # Dispatcher for routing decisions
 
         # Fan-out/fan-in tracking
         self._task_groups: dict[str, TaskGroup] = {}  # group_id -> TaskGroup
@@ -124,7 +131,7 @@ class SelfSelectingPool:
 
         Creates a watcher coroutine for each registered agent.
         """
-        logger.info("Starting self-selecting pool with %d agents", len(self._registry))
+        logger.info("Starting dispatcher pool with %d agents", len(self._registry))
 
         for agent in self._registry.all_agents():
             watcher = asyncio.create_task(
@@ -209,9 +216,10 @@ class SelfSelectingPool:
         logger.debug("Agent '%s' watcher stopped", agent.name)
 
     async def _execute_task(self, agent: "BaseAgent", task: Task) -> None:
-        """Execute a claimed task.
+        """Execute a claimed task with validation.
 
-        Handles three types of HandoffResult:
+        First validates that the agent accepts the assignment. If rejected,
+        re-routes to a different agent. Otherwise executes and handles:
         - handoff: Sequential handoff to next agent
         - fan_out: Parallel execution of multiple tasks
         - complete: Task finished
@@ -219,6 +227,19 @@ class SelfSelectingPool:
         :param agent: Agent executing the task
         :param task: Task to execute
         """
+        # Validate assignment before execution
+        if hasattr(agent, "validate_assignment"):
+            validation = await agent.validate_assignment(task)
+            if not validation.accepted:
+                logger.info(
+                    "Agent '%s' rejected task %s: %s",
+                    agent.name,
+                    task.id[:8],
+                    validation.rejection_reason,
+                )
+                await self._handle_rejection(agent, task, validation)
+                return
+
         task.status = TaskStatus.RUNNING
 
         try:
@@ -297,6 +318,85 @@ class SelfSelectingPool:
 
             # Check if this task is part of a group
             await self._check_group_completion(task)
+
+    async def _handle_rejection(
+        self,
+        agent: "BaseAgent",
+        task: Task,
+        validation: ValidationResult,
+    ) -> None:
+        """Handle agent rejection and re-route task.
+
+        Tracks routing attempts and either re-routes to a different agent
+        or fails the task if max attempts exceeded.
+
+        :param agent: Agent that rejected the task
+        :param task: Task that was rejected
+        :param validation: ValidationResult with rejection reason
+        """
+        # Get current routing attempts
+        attempts = task.context.get("routing_attempts", [])
+        attempts.append({
+            "agent": agent.name,
+            "rejected": validation.rejection_reason,
+        })
+
+        # Check max attempts
+        if len(attempts) >= self.MAX_ROUTING_ATTEMPTS:
+            logger.error(
+                "Task %s failed: max routing attempts exceeded. Rejections: %s",
+                task.id[:8],
+                attempts,
+            )
+            task.status = TaskStatus.FAILED
+            task.result = TaskResult(
+                success=False,
+                error=f"Max routing attempts exceeded. Rejections: {attempts}",
+            )
+            self._results[task.id] = task.result
+            await self._registry.mark_task_completed(task)
+            return
+
+        # Build exclusion list from previous attempts
+        excluded = [a["agent"] for a in attempts]
+
+        # Re-route with context about the rejection
+        intent = task.context.get("intent", task.description)
+        new_target = await self._intent_router.find_agent_for_intent(
+            intent,
+            self._registry,
+            excluded_agents=excluded,
+            rejection_context=validation.rejection_reason,
+        )
+
+        if new_target is None:
+            logger.error(
+                "Task %s failed: no agent available after rejections: %s",
+                task.id[:8],
+                attempts,
+            )
+            task.status = TaskStatus.FAILED
+            task.result = TaskResult(
+                success=False,
+                error=f"No agent available after rejections: {attempts}",
+            )
+            self._results[task.id] = task.result
+            await self._registry.mark_task_completed(task)
+            return
+
+        # Update task context and resubmit
+        logger.info(
+            "Re-routing task %s from '%s' to '%s'",
+            task.id[:8],
+            agent.name,
+            new_target.name,
+        )
+        task.context["routed_to"] = new_target.name
+        task.context["routing_attempts"] = attempts
+        task.status = TaskStatus.PENDING
+
+        # Resubmit task to queue
+        await self._registry.submit_async(task)
 
     async def _post_handoff_task(
         self,
@@ -527,14 +627,17 @@ class SelfSelectingPool:
     async def submit_and_wait(
         self,
         description: str,
-        capabilities: list[str],
+        capabilities: list[str] | None = None,
         context: dict | None = None,
         timeout: float | None = None,
     ) -> TaskResult:
         """Submit a task and wait for the full handoff chain to complete.
 
+        Routes the initial task through the LLMIntentRouter (dispatcher)
+        to determine which agent should handle it.
+
         :param description: Natural language task description
-        :param capabilities: Required capabilities for the task
+        :param capabilities: Optional capabilities (deprecated, routing uses LLM)
         :param context: Optional context dict
         :param timeout: Optional timeout in seconds
         :return: TaskResult when complete (follows handoff chain)
@@ -543,17 +646,29 @@ class SelfSelectingPool:
 
         start_time = time.time()
 
+        # Route initial task through dispatcher
+        target_agent = await self._intent_router.find_agent_for_intent(
+            description, self._registry
+        )
+        routed_to = target_agent.name if target_agent else None
+
+        if routed_to:
+            logger.info("Dispatcher routed initial task to '%s': %s", routed_to, description[:50])
+        else:
+            logger.warning("Dispatcher could not route initial task: %s", description[:50])
+
         # Ensure goal and intent are set in context for autonomous execution
         task_context = context.copy() if context else {}
         if "goal" not in task_context:
             task_context["goal"] = description
         if "intent" not in task_context:
             task_context["intent"] = description
+        task_context["routed_to"] = routed_to  # Set routing from dispatcher
 
         task = Task(
             id=str(uuid4()),
             description=description,
-            required_capabilities=capabilities,
+            required_capabilities=capabilities or [],
             context=task_context,
         )
 
@@ -892,25 +1007,25 @@ class SelfSelectingPool:
         return sum(1 for w in self._agent_watchers.values() if not w.done())
 
 
-async def run_with_self_selection(
+async def run_with_dispatcher(
     registry: "AgentRegistry",
     description: str,
-    capabilities: list[str],
+    capabilities: list[str] | None = None,
     context: dict | None = None,
     timeout: float = 60.0,
 ) -> TaskResult:
-    """Convenience function to run a single task with self-selection.
+    """Convenience function to run a single task with dispatcher routing.
 
     Creates a pool, runs a single task, and shuts down.
 
     :param registry: AgentRegistry with registered agents
     :param description: Task description
-    :param capabilities: Required capabilities
+    :param capabilities: Optional capabilities (deprecated, routing uses LLM)
     :param context: Optional task context
     :param timeout: Task timeout in seconds
     :return: TaskResult
     """
-    pool = SelfSelectingPool(registry)
+    pool = DispatcherPool(registry)
 
     # Start the pool
     await pool.start()

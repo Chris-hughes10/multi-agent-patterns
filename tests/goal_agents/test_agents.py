@@ -18,14 +18,14 @@ from youtube_agent_orchestrator.models.youtube import (
     VideoMetadata,
     VideoSearchResult,
 )
-from youtube_autonomous_agents.agents import (
+from youtube_goal_agents.agents import (
     SearchAgent,
     SummarizeAgent,
     TranscriptAgent,
     WriterAgent,
 )
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
 
 # ============================================================================
 # Test Helpers for LLM Mocking
@@ -77,7 +77,7 @@ def mock_goal_reasoning(satisfied: bool = True, next_step: str = ""):
     mock_client = create_mock_chat_client(satisfied, next_step)
     # Patch where BaseAgent gets the chat client (all agents now use base class client)
     with patch(
-        "youtube_autonomous_agents.agents.base.get_chat_client",
+        "youtube_goal_agents.agents.base.get_chat_client",
         return_value=mock_client,
     ):
         yield mock_client
@@ -188,7 +188,7 @@ class TestSearchAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.search.search_youtube",
+                "youtube_goal_agents.agents.search.search_youtube",
                 new_callable=AsyncMock,
                 return_value=mock_search_results,
             ),
@@ -215,7 +215,7 @@ class TestSearchAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.search.search_youtube",
+                "youtube_goal_agents.agents.search.search_youtube",
                 new_callable=AsyncMock,
                 return_value=mock_search_results,
             ),
@@ -243,7 +243,7 @@ class TestSearchAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.search.search_youtube",
+                "youtube_goal_agents.agents.search.search_youtube",
                 new_callable=AsyncMock,
                 return_value=mock_search_results,
             ),
@@ -268,7 +268,7 @@ class TestSearchAgentAutonomous:
         agent = SearchAgent(registry)
 
         with patch(
-            "youtube_autonomous_agents.agents.search.search_youtube",
+            "youtube_goal_agents.agents.search.search_youtube",
             new_callable=AsyncMock,
             return_value=mock_search_results,
         ) as mock_search:
@@ -292,7 +292,7 @@ class TestSearchAgentAutonomous:
         agent = SearchAgent(registry)
 
         with patch(
-            "youtube_autonomous_agents.agents.search.search_youtube",
+            "youtube_goal_agents.agents.search.search_youtube",
             new_callable=AsyncMock,
             return_value=mock_search_results,
         ) as mock_search:
@@ -314,7 +314,7 @@ class TestSearchAgentAutonomous:
         agent = SearchAgent(registry)
 
         with patch(
-            "youtube_autonomous_agents.agents.search.search_youtube",
+            "youtube_goal_agents.agents.search.search_youtube",
             new_callable=AsyncMock,
             side_effect=Exception("Network error"),
         ):
@@ -346,12 +346,12 @@ class TestTranscriptAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.transcript.fetch_transcript",
+                "youtube_goal_agents.agents.transcript.fetch_transcript",
                 new_callable=AsyncMock,
                 return_value=mock_transcript_result,
             ),
             patch(
-                "youtube_autonomous_agents.agents.transcript.TranscriptStorage"
+                "youtube_goal_agents.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
             mock_goal_reasoning(satisfied=True),
         ):
@@ -380,12 +380,12 @@ class TestTranscriptAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.transcript.fetch_transcript",
+                "youtube_goal_agents.agents.transcript.fetch_transcript",
                 new_callable=AsyncMock,
                 return_value=mock_transcript_result,
             ),
             patch(
-                "youtube_autonomous_agents.agents.transcript.TranscriptStorage"
+                "youtube_goal_agents.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
             mock_goal_reasoning(satisfied=False, next_step="Summarize these transcripts"),
         ):
@@ -415,12 +415,12 @@ class TestTranscriptAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.transcript.fetch_transcript",
+                "youtube_goal_agents.agents.transcript.fetch_transcript",
                 new_callable=AsyncMock,
                 return_value=mock_transcript_result,
             ),
             patch(
-                "youtube_autonomous_agents.agents.transcript.TranscriptStorage"
+                "youtube_goal_agents.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
             mock_goal_reasoning(satisfied=True),
         ):
@@ -479,7 +479,7 @@ class TestSummarizeAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.summarize.TranscriptSummarizer"
+                "youtube_goal_agents.agents.summarize.TranscriptSummarizer"
             ) as mock_summarizer_class,
             mock_goal_reasoning(satisfied=True),
         ):
@@ -512,7 +512,7 @@ class TestSummarizeAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.summarize.TranscriptSummarizer"
+                "youtube_goal_agents.agents.summarize.TranscriptSummarizer"
             ) as mock_summarizer_class,
             mock_goal_reasoning(satisfied=False, next_step="Write these summaries to a markdown file"),
         ):
@@ -570,7 +570,7 @@ class TestWriterAgentAutonomous:
         agent = WriterAgent(registry)
 
         with patch(
-            "youtube_autonomous_agents.agents.writer.write_timestamped_markdown",
+            "youtube_goal_agents.agents.writer.write_timestamped_markdown",
             new_callable=AsyncMock,
             return_value="/output/test_file.md",
         ):
@@ -612,12 +612,12 @@ class TestWriterAgentAutonomous:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.writer.write_timestamped_markdown",
+                "youtube_goal_agents.agents.writer.write_timestamped_markdown",
                 new_callable=AsyncMock,
                 side_effect=capture_write,
             ),
             patch(
-                "youtube_autonomous_agents.agents.base.get_chat_client",
+                "youtube_goal_agents.agents.base.get_chat_client",
                 return_value=mock_client,
             ),
         ):
@@ -671,7 +671,7 @@ class TestAutonomousChain:
 
         with (
             patch(
-                "youtube_autonomous_agents.agents.search.search_youtube",
+                "youtube_goal_agents.agents.search.search_youtube",
                 new_callable=AsyncMock,
                 return_value=mock_search_results,
             ),
@@ -700,7 +700,7 @@ class TestAutonomousChain:
         # Step 1: Search hands off to transcript
         with (
             patch(
-                "youtube_autonomous_agents.agents.search.search_youtube",
+                "youtube_goal_agents.agents.search.search_youtube",
                 new_callable=AsyncMock,
                 return_value=mock_search_results,
             ),
@@ -717,12 +717,12 @@ class TestAutonomousChain:
         # Step 2: Transcript completes
         with (
             patch(
-                "youtube_autonomous_agents.agents.transcript.fetch_transcript",
+                "youtube_goal_agents.agents.transcript.fetch_transcript",
                 new_callable=AsyncMock,
                 return_value=mock_transcript_result,
             ),
             patch(
-                "youtube_autonomous_agents.agents.transcript.TranscriptStorage"
+                "youtube_goal_agents.agents.transcript.TranscriptStorage"
             ) as mock_storage_class,
             mock_goal_reasoning(satisfied=True),
         ):
@@ -751,8 +751,8 @@ class TestAutonomousLoopDetection:
 
     def test_loop_detector_detects_simple_cycle(self) -> None:
         """Test that LoopDetector detects simple A->B->A cycles."""
-        from youtube_autonomous_agents.infra.loop_detector import LoopDetector
-        from youtube_autonomous_agents.infra.session import ExecutionStep
+        from youtube_goal_agents.infra.loop_detector import LoopDetector
+        from youtube_goal_agents.infra.session import ExecutionStep
 
         # max_visits=2 means agent can be visited at most 2 times, 3rd visit triggers
         detector = LoopDetector(max_visits=2, window_size=10)
@@ -771,8 +771,8 @@ class TestAutonomousLoopDetection:
 
     def test_loop_detector_allows_normal_progression(self) -> None:
         """Test that LoopDetector allows normal agent progression."""
-        from youtube_autonomous_agents.infra.loop_detector import LoopDetector
-        from youtube_autonomous_agents.infra.session import ExecutionStep
+        from youtube_goal_agents.infra.loop_detector import LoopDetector
+        from youtube_goal_agents.infra.session import ExecutionStep
 
         detector = LoopDetector(max_visits=3, window_size=10)
 

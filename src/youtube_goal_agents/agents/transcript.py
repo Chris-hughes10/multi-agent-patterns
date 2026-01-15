@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from agent_framework.azure import AzureOpenAIChatClient
 
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 from youtube_agent_orchestrator.services.youtube import extract_video_id, fetch_transcript
@@ -19,9 +19,9 @@ from youtube_agent_orchestrator.tools.youtube import (
     lookup_stored_transcript,
     store_video_transcript,
 )
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.models import Task, TaskResult, TaskStatus
-from youtube_autonomous_agents.models.handoff import HandoffResult, PartialResult
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.models import Task, TaskResult, TaskStatus
+from youtube_goal_agents.models.handoff import HandoffResult, PartialResult
 
 logger = logging.getLogger(__name__)
 
@@ -136,26 +136,6 @@ class TranscriptAgent(BaseAgent):
             lookup_stored_transcript,
             list_stored_transcripts,
         ]
-
-    def _can_handle_intent(self, intent: str) -> bool:
-        """Check if this agent can handle a natural language intent.
-
-        Override to reject summarize/analyze intents - those should go to SummarizeAgent
-        even if "transcript" appears in the text.
-
-        :param intent: Natural language intent from handoff
-        :return: True if this agent should handle the intent
-        """
-        intent_lower = intent.lower()
-
-        # Reject summarize/analyze intents - those are for SummarizeAgent
-        summarize_keywords = ["summarize", "summary", "key points", "analyze", "extract info"]
-        if any(kw in intent_lower for kw in summarize_keywords):
-            return False
-
-        # Accept transcript-related intents
-        transcript_keywords = ["transcript", "captions", "fetch", "get text", "spoken words"]
-        return any(kw in intent_lower for kw in transcript_keywords)
 
     async def execute(self, task: Task) -> TaskResult:
         """Execute transcript task and return structured results.

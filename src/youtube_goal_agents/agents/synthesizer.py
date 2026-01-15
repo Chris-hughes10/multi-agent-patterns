@@ -3,7 +3,7 @@
 The Synthesizer is the single point of contact for users. It:
 - Receives all user messages
 - Analyzes requests for parallelism opportunities
-- Delegates to SelfSelectingPool for agent coordination
+- Delegates to DispatcherPool for agent coordination
 - Aggregates results and produces the final user-facing response
 
 The Synthesizer is a thin wrapper that uses the pool's coordination methods,
@@ -17,15 +17,15 @@ from agent_framework import ChatAgent
 from agent_framework.azure import AzureOpenAIChatClient
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
-from youtube_autonomous_agents.infra.pool import SelfSelectingPool
-from youtube_autonomous_agents.models.handoff import (
+from youtube_goal_agents.infra.pool import DispatcherPool
+from youtube_goal_agents.models.handoff import (
     HandoffResult,
     PartialResult,
     RequestAnalysis,
 )
 
 if TYPE_CHECKING:
-    from youtube_autonomous_agents.infra.registry import AgentRegistry
+    from youtube_goal_agents.infra.registry import AgentRegistry
 
 
 SYNTHESIZER_INSTRUCTIONS = """You are a Synthesizer Agent - the user's primary assistant for YouTube video research.
@@ -97,7 +97,7 @@ class SynthesizerAgent:
 
     The Synthesizer is a thin entry point that:
     1. Analyzes requests for parallelism (LLM-based)
-    2. Delegates to SelfSelectingPool for all coordination
+    2. Delegates to DispatcherPool for all coordination
     3. Formats the final response
 
     Uses the same pool methods that agents use for fan-out operations,
@@ -118,7 +118,7 @@ class SynthesizerAgent:
         registry: "AgentRegistry",
         client: AzureOpenAIChatClient | None = None,
         timeout: float = 120.0,
-        pool: SelfSelectingPool | None = None,
+        pool: DispatcherPool | None = None,
     ) -> None:
         """Initialize the synthesizer.
 
@@ -149,7 +149,7 @@ class SynthesizerAgent:
             )
         return self._chat_agent
 
-    async def _get_pool(self) -> tuple[SelfSelectingPool, bool]:
+    async def _get_pool(self) -> tuple[DispatcherPool, bool]:
         """Get or create the pool for request processing.
 
         Returns a tuple of (pool, should_shutdown):
@@ -165,7 +165,7 @@ class SynthesizerAgent:
             return self._external_pool, False
 
         # CLI mode: create per-request pool
-        pool = SelfSelectingPool(self._registry)
+        pool = DispatcherPool(self._registry)
         await pool.start()
         return pool, True
 

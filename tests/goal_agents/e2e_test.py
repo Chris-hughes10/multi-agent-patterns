@@ -10,7 +10,7 @@ import logging
 import re
 from pathlib import Path
 
-from youtube_autonomous_agents.cli.main import process_request
+from youtube_goal_agents.cli.main import process_request
 
 # Enable logging at INFO level for key components
 logging.basicConfig(
@@ -18,7 +18,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-logging.getLogger("youtube_autonomous_agents").setLevel(logging.INFO)
+logging.getLogger("youtube_goal_agents").setLevel(logging.INFO)
 
 # Expected video IDs from trusted channels
 EXPECTED_VIDEO_IDS = [

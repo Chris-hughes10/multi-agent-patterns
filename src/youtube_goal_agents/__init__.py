@@ -1,10 +1,10 @@
-"""YouTube Autonomous Agents - Event-Driven Multi-Agent Patterns.
+"""YouTube Goal-Aware Agents - Event-Driven Multi-Agent Patterns.
 
-This module implements the autonomous agent pattern where agents:
-- Self-select tasks based on capabilities
+This module implements the goal-aware agent pattern where agents:
+- Validate assigned tasks before execution
 - Reason about goals and hand off to each other
 - Execute fan-out/fan-in parallel operations
-- Complete tasks without central orchestration
+- Coordinate via dispatcher with agent confirmation
 
 Architecture (DDD):
 - agents/: Domain layer (agent implementations + base class)
@@ -13,9 +13,9 @@ Architecture (DDD):
 - cli/: CLI layer (commands, driver functions)
 """
 
-from youtube_autonomous_agents.agents.base import BaseAgent
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.models import (
+from youtube_goal_agents.agents.base import BaseAgent
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.models import (
     HandoffResult,
     Task,
     TaskResult,
