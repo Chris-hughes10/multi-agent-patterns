@@ -5,7 +5,7 @@ Business logic is in services/storage.py, model is in models/storage.py.
 """
 
 from youtube_agent_orchestrator.models.storage import StoredTranscript
-from youtube_agent_orchestrator.models.transcript import TranscriptResult
+from youtube_agent_orchestrator.models.youtube import TranscriptResult
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 
 __all__ = [

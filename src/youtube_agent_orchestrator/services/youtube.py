@@ -15,7 +15,6 @@ import re
 import urllib.parse
 from typing import Protocol
 
-import httpx
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     NoTranscriptFound,
@@ -24,13 +23,14 @@ from youtube_transcript_api._errors import (
 )
 from youtube_transcript_api.proxies import GenericProxyConfig
 
+from youtube_agent_orchestrator.infra import fetch_html
 from youtube_agent_orchestrator.models.config import get_settings
-from youtube_agent_orchestrator.models.search import VideoSearchResult
-from youtube_agent_orchestrator.models.transcript import (
+from youtube_agent_orchestrator.models.youtube import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
+    VideoSearchResult,
 )
 
 # =============================================================================
@@ -331,20 +331,8 @@ async def search_youtube(query: str, max_results: int = 5) -> list[VideoSearchRe
         encoded_query = urllib.parse.quote_plus(query)
         url = f"https://www.youtube.com/results?search_query={encoded_query}"
 
-        # Make request with appropriate headers
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            html = response.text
+        # Fetch HTML using infra client
+        html = await fetch_html(url)
 
         # Extract videos from HTML
         video_data = _extract_videos_from_html(html, max_results)

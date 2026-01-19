@@ -1,31 +1,26 @@
-"""CLI entry point for youtube-agent-planner.
+"""Driver module - shared logic for CLI and programmatic usage.
 
-Provides DAG-based execution planning with explicit plan visibility.
+This module provides the core driver functions that can be used by:
+- CLI commands
+- E2E tests
+- Programmatic API consumers
 """
 
-import asyncio
 import logging
 
-import click
-
 from youtube_agent_planner.agents.planner import PlannerAgent
-from youtube_agent_planner.patterns.dag_executor import DAGExecutor
-from youtube_autonomous_agents.agents import (
+from youtube_agent_planner.infra.dag_executor import DAGExecutor
+from youtube_goal_agents.agents import (
     SearchAgent,
     SummarizeAgent,
     TranscriptAgent,
     WriterAgent,
 )
-from youtube_autonomous_agents.infra import AgentRegistry
-from youtube_autonomous_agents.infra.session import Session
-from youtube_autonomous_agents.models.handoff import PartialResult
+from youtube_goal_agents.infra import AgentRegistry
+from youtube_goal_agents.infra.session import Session
+from youtube_goal_agents.models.handoff import PartialResult
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("youtube_agent_planner.cli")
+logger = logging.getLogger("youtube_agent_planner.driver")
 
 
 def create_registry() -> AgentRegistry:
@@ -50,37 +45,53 @@ def create_registry() -> AgentRegistry:
     return registry
 
 
-async def run_with_planning(
-    request: str,
-    registry: AgentRegistry,
-) -> str | None:
-    """Run a request using the planner + DAG pattern.
+def create_planner(registry: AgentRegistry | None = None) -> PlannerAgent:
+    """Create a PlannerAgent.
 
-    :param request: User's natural language request
-    :param registry: Agent registry with registered agents
+    :param registry: Optional pre-configured registry (creates new if None)
+    :return: Configured PlannerAgent
+    """
+    if registry is None:
+        registry = create_registry()
+    return PlannerAgent(registry=registry)
+
+
+async def process_request(
+    request: str,
+    registry: AgentRegistry | None = None,
+    planner: PlannerAgent | None = None,
+) -> str | None:
+    """Process a user request through the planner + DAG pattern.
+
+    This is the main driver function that handles:
+    - Creating the planner (if not provided)
+    - Planning the execution DAG
+    - Executing the DAG
+    - Returning the result
+
+    :param request: Natural language user request
+    :param registry: Optional pre-configured registry (creates new if None)
+    :param planner: Optional pre-created planner (creates new if None)
     :return: Result string or None on failure
     """
-    planner = PlannerAgent(registry=registry)
+    if registry is None:
+        registry = create_registry()
+    if planner is None:
+        planner = PlannerAgent(registry=registry)
+
     session = Session()
 
     # Create plan
-    click.echo("[Planning...] Creating execution plan", nl=False)
+    logger.info("Creating execution plan for request: %s", request[:50])
     try:
         dag = await planner.create_plan(request)
-        click.echo(f" ✓ ({len(dag.steps)} steps)")
+        logger.info("Created plan with %d steps", len(dag.steps))
     except ValueError as e:
-        click.echo(" ✗ Failed")
-        click.echo(f"Planning error: {e}", err=True)
+        logger.error("Planning failed: %s", e)
         return None
 
-    # Display the plan
-    click.echo(f"[Plan] Goal: {dag.goal}")
-    for step in dag.steps:
-        deps_str = f" (after: {', '.join(step.depends_on)})" if step.depends_on else ""
-        click.echo(f"  → {step.id}: {step.description}{deps_str}")
-
     # Execute the DAG
-    click.echo("[Executing...] Running DAG")
+    logger.info("Executing DAG")
     executor = DAGExecutor(
         registry=registry,
         session=session,
@@ -90,7 +101,7 @@ async def run_with_planning(
     result = await executor.execute(dag)
 
     if isinstance(result, PartialResult):
-        click.echo(f"\nPartial result (error: {result.error}):", err=True)
+        logger.warning("Partial result (error: %s)", result.error)
         if result.partial_data:
             return str(result.partial_data)
         return None
@@ -108,91 +119,21 @@ async def run_with_planning(
         return None
 
 
-@click.group()
-@click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
-def cli(verbose: bool) -> None:
-    """YouTube Agent Planner - DAG-based execution planning.
+def list_agents() -> list[dict]:
+    """List all registered agents and their capabilities.
 
-    Uses LLM to create an explicit execution plan (DAG), then runs
-    the steps with dependency tracking and parallel execution.
-
-    For autonomous agent chains without upfront planning, use:
-      uv run youtube-agent-v2
+    :return: List of dicts with agent name and capabilities
     """
-    if verbose:
-        logging.getLogger("youtube_agent_planner").setLevel(logging.DEBUG)
-        logging.getLogger("youtube_autonomous_agents").setLevel(logging.DEBUG)
-
-
-@cli.command()
-@click.option("-r", "--request", default=None, help="Single request (interactive if not provided)")
-def chat(request: str | None) -> None:
-    """Interactive chat mode with planner + DAG execution."""
-
-    async def run_chat() -> None:
-        registry = create_registry()
-
-        click.echo("\nYouTube Agent Planner - Interactive Mode")
-        click.echo("=" * 50)
-        click.echo("Creates explicit execution plans before running.")
-        click.echo("Type 'exit' or 'quit' to stop.\n")
-
-        # Single request mode
-        if request:
-            result = await run_with_planning(request, registry)
-            if result:
-                click.echo("\n" + result)
-            return
-
-        # Interactive loop
-        while True:
-            try:
-                user_input = click.prompt("You", default="", show_default=False)
-
-                if not user_input.strip():
-                    continue
-
-                if user_input.strip().lower() in ("exit", "quit"):
-                    click.echo("Goodbye!")
-                    break
-
-                click.echo("\nAgent: ", nl=False)
-                result = await run_with_planning(user_input, registry)
-                if result:
-                    click.echo("\n" + result)
-                click.echo()
-
-            except KeyboardInterrupt:
-                click.echo("\nGoodbye!")
-                break
-            except click.exceptions.Abort:
-                click.echo("\nGoodbye!")
-                break
-
-    asyncio.run(run_chat())
-
-
-@cli.command()
-def agents() -> None:
-    """List registered agents and their capabilities."""
     registry = create_registry()
-
-    click.echo("\nRegistered Agents:")
-    click.echo("-" * 40)
-
-    for agent in registry.all_agents():
-        click.echo(f"\n  {agent.name}:")
-        click.echo(f"    Capabilities: {', '.join(agent.capabilities)}")
-
-    click.echo("\n" + "-" * 40)
-    click.echo(f"Total: {len(registry)} agents")
-    click.echo(f"All capabilities: {', '.join(registry.all_capabilities())}")
+    return [
+        {"name": agent.name, "capabilities": list(agent.capabilities)}
+        for agent in registry.all_agents()
+    ]
 
 
-def main() -> None:
-    """Main entry point."""
-    cli()
-
-
-if __name__ == "__main__":
-    main()
+__all__ = [
+    "create_registry",
+    "create_planner",
+    "process_request",
+    "list_agents",
+]

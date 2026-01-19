@@ -1,12 +1,15 @@
-# Architecting Multi-Agent Systems: Lessons from Building a YouTube Research Assistant
+# Architecting Multi-Agent Systems: Evolving Proven Patterns to Agentic Systems
 
-The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, the Claude Agent SDK - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
+Since the release of ChatGPT, AI agents have captured everyone's imagination. The promise is compelling: give an AI system a goal, let it break down the problem, use tools to gather information, and synthesize a result.
 
-I wanted to go beyond that. Not to build something enterprise-scale, but to build something **non-trivial yet clean** - proving that agent systems can be architected with the same discipline we apply to any serious software project.
+The AI agent landscape is crowded. LangChain, CrewAI, AutoGen, Semantic Kernel, Microsoft's Agent Framework - new frameworks appear constantly, each promising to simplify building intelligent applications. Yet most tutorials focus on "hello world" demos: a single agent answering questions, maybe calling a tool or two.
 
-## The Problem That Started This
 
-I'm a BBQ enthusiast, and YouTube is an incredible resource for learning. Channels like Chuds BBQ, Meat Church, and Mad Scientist BBQ have content that rivals any cookbook - but the knowledge is locked in video format. When I'm planning a cook, I find myself:
+I wanted to build something more ambitious than this; to explore different architectural patterns, understand their complexity, and learn their trade-offs. My ambition was to start with the well-understood orchestrator pattern, then explore more advanced ideas such as planning-based approaches and autonomous agents that can self-assign and delegate to each other; demonstrating that agentic systems can be architected with the same discipline we apply to any serious software project.
+
+## Choosing a problem domain
+
+I'm a cooking enthusiast, and one of my favourite cuisines is barbecue. Unlike other culinary domains where high-quality cookbooks are abundant, it's scattered across YouTube channels like *Chuds BBQ*, *Fork and Embers*, and *Mad Scientist BBQ*. These channels offer content that rivals any cookbook, but the knowledge is locked in video format, which makes it difficult to quickly find and reference specific techniques or information. When planning a cook, I often find myself:
 
 1. Searching across multiple channels for a specific technique
 2. Watching (or skipping through) several videos
@@ -15,100 +18,260 @@ I'm a BBQ enthusiast, and YouTube is an incredible resource for learning. Channe
 
 This felt like a good candidate for automation. Search YouTube, fetch transcripts, extract the relevant information, synthesise it into a reference document. Four distinct capabilities, potentially handled by specialized agents.
 
-But more importantly, it felt like a good test case for a question I had: **can you build a multi-agent system that doesn't become an unmaintainable mess?**
+But more importantly, it felt like a good test case as it is non-trivial but straightforward; complex enough to require multiple agents and tools, but simple enough to focus on architecture rather than domain complexity.
 
-Most agent code I've seen mixes everything together - LLM calls, API integrations, business logic, formatting - in ways that would make any software engineer wince. I wanted to prove that the patterns we use for clean architecture in traditional systems apply equally to agent systems.
 
 ## In this article, we shall cover:
 
-- Why agent systems benefit from the same layered architecture as any complex application
+- Why agentic systems benefit from the same layered architecture as any complex application
 - The critical distinction between **tools** (LLM interface) and **services** (business logic) - the key insight that unlocks clean agent design
-- How Domain-Driven Design concepts map naturally to agent architectures
-- A practical example: four specialized agents with clear boundaries
+- How Domain-Driven Design concepts map naturally to agentic architectures
+- A practical example: an orchestrator coordinating four specialized agents
 
-The specific framework matters less than the principles. What follows applies whether you're using the Claude Agent SDK, LangChain, or building your own orchestration.
+For this project, I'm using the [Microsoft Agent Framework](https://github.com/microsoft/agents) - an open-source SDK for building AI agents in Python. It's the successor to both Semantic Kernel and AutoGen, combining AutoGen's simple abstractions for single- and multi-agent patterns with Semantic Kernel's enterprise features like thread-based state management and type safety. It also adds explicit workflow control for multi-agent execution paths.
 
-Let's start with the problem.
+That said, the specific framework matters less than the principles. What follows applies whether you're using the Microsoft Agent Framework, LangChain, or building your own orchestration.
+
 
 ---
 
 ## The Architecture Challenge
 
-Agent code gets messy fast. Here's what our first attempt looked like:
+Whilst researching how to get started, I noticed a common theme: most frameworks make it easy to build demos, but they don't guide you towards creating an architecture that is maintainable and extensible.
+
+In a lot of the code I encountered, the lines between LLM calls, tool integrations, business logic, and orchestration were blurred. In software engineering—we've known about separation of concerns for decades. But in the agent space, the frameworks prioritize "getting started quickly" over architectural guidance. The tutorials optimize for "look how easy!" rather than "look how maintainable!" 
+
+Understanding where to draw these boundaries is the difference between a system that scales and one that collapses under its own complexity.
+
+As an example, here's a simplified version of a monolithic approach that mixes everything together:
 
 ```python
-# orchestrator.py - the "everything file"
+# orchestrator.py - agents, tools, prompts, and business logic all in one
 
-def search_and_summarize(query: str) -> str:
-    # Search YouTube
-    response = requests.get(f"https://youtube.com/results?q={query}")
-    videos = parse_html_for_videos(response.text)
+def run_research(query: str) -> str:
 
-    # Fetch transcripts
-    transcripts = []
-    for video in videos[:3]:
-        transcript = YouTubeTranscriptApi.get_transcript(video.id)
-        transcripts.append(transcript)
+    # Search agent with tool defined inline
+    def search_youtube(q: str) -> str:
+        response = requests.get(f"https://youtube.com/results?q={q}")
+        return parse_html_for_videos(response.text)
 
-    # Call LLM to summarize
-    client = AzureOpenAI(...)
-    summary = client.chat.completions.create(
-        messages=[{"role": "user", "content": f"Summarize: {transcripts}"}]
+    search_agent = ChatAgent(
+        name="SearchAgent",
+        instructions="""You search YouTube. Use search_youtube to find videos.
+        Return video IDs and titles as JSON.""",
+        tools=[search_youtube]
     )
 
-    # Save to file
-    with open("output.md", "w") as f:
-        f.write(summary)
+    # Transcript agent with its own inline tool
+    def get_transcript(video_id: str) -> str:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        return " ".join([t["text"] for t in transcript])
 
+    transcript_agent = ChatAgent(
+        name="TranscriptAgent",
+        instructions="Fetch transcripts using get_transcript tool.",
+        tools=[get_transcript]
+    )
+
+    # Summarize agent with prompt engineering embedded
+    summarize_agent = ChatAgent(
+        name="SummarizeAgent",
+        instructions=f"""Summarize cooking content. Focus on:
+        - Temperatures and timing
+        - Key techniques
+        - Pro tips
+        Format as markdown."""
+    )
+
+    # Orchestration logic interleaved with agent calls
+    client = AzureOpenAI(api_key=os.environ["KEY"], ...)
+
+    videos = search_agent.run(query, client=client)
+    transcripts = []
+    for vid in parse_json(videos)[:3]:
+        text = transcript_agent.run(f"Get transcript for {vid['id']}", client=client)
+        transcripts.append(text)
+
+    summary = summarize_agent.run(f"Summarize:\n{transcripts}", client=client)
+
+    Path(f"./outputs/{query}.md").write_text(summary)
     return summary
 ```
 
-**After: Layered architecture**
+This works for a demo, and can be absolutely the right approach for validating ideas quickly. But it has serious problems:
+
+- **Difficult to test** agents without hitting real APIs
+- **Not reusable** - Tools are trapped inside this function
+- **Hard to extend** - Adding a new agent means modifying this monolith
+- **Impossible to modify in isolation** - Changing one agent risks breaking others
+- **Prompts scattered everywhere** - No single place to tune agent behaviour
+
+With this as our starting point, let's explore how we can improve things. 
+
+### What Makes This an Architectural Problem
+When an LLM "calls a tool", it's doing two distinct things:
+
+1. Invoking a function with simple parameters (strings, numbers)
+2. Interpreting a string result
+
+But the actual work - searching YouTube, parsing HTML, handling errors - is complex. It involves configuration, error handling, retries, and returns rich objects with multiple fields.
+
+These are different concerns. The LLM needs simple strings. Your application needs proper abstractions. Conflating them is like putting SQL queries directly in your view layer—it works, but it's architecturally wrong.
+
+These are two separate responsibilities that we've been mixing together. Separating them unlocks testability, reusability, and clarity.
+
+## So, What Does Separation Look Like?
+
+I settled on splitting these concerns in the following way:
+
+### Tools = LLM Interface
+
+Tools are thin wrappers that translate between LLM and application. They:
+
+- Accept simple parameters (strings, numbers, booleans)
+- Call the appropriate service
+- Format the result as a string the LLM can understand
+- Are stateless
 
 ```python
-# Tool layer (agents/tools/) - LLM interface
-async def fetch_video_transcript(video_id: str) -> str:
-    """Fetch transcript - thin wrapper returning string for LLM."""
-    result = await youtube_service.fetch_transcript(video_id)
-    return format_transcript_for_llm(result)
+# tools/youtube.py
 
-# Service layer (services/) - business logic
-class YouTubeService:
-    async def fetch_transcript(self, video_id: str) -> TranscriptResult:
-        """Fetch transcript - rich typed object returned."""
-        transcript = await YouTubeTranscriptApi.get(video_id)
-        metadata = await self._fetch_metadata(video_id)
-        return TranscriptResult(
-            transcript=transcript,
-            metadata=metadata,
-            video_id=video_id
-        )
+async def fetch_video_transcript(
+    video_id: Annotated[str, Field(description="YouTube video ID")]
+) -> str:
+    """Fetch the transcript for a YouTube video.
 
-# Model layer (models/) - domain objects
-@dataclass
-class TranscriptResult:
-    transcript: list[dict[str, Any]]
-    metadata: VideoMetadata
-    video_id: str
+    Returns the full transcript text with video metadata.
+    """
+    result = await fetch_transcript(video_id)  # calls service
 
-# Now each component is:
-# - Testable in isolation (mock the service, not external APIs)
-# - Reusable across agents
-# - Focused on a single concern
+    ## Format for LLM
+    return f"Transcript for '{result.metadata.title}':\n\n{result.transcript.full_text}"
 ```
 
-This works for a demo. But it's untestable without hitting real APIs, impossible to reuse components, and will become incomprehensible as we add features.
+Notice what the tool does NOT do:
+- No configuration management
+- No complex return types
+- No business logic
 
-The core insight that changed our architecture: **LLM-callable functions have fundamentally different concerns than business logic**. Separating them unlocks testability and reusability.
+This tool does one thing: call the service and format the result. Just adaptation.
 
-### The Layered Architecture
+### Services = Business Logic
 
-We settled on six layers, each with a single, well-defined responsibility. If you're familiar with Domain-Driven Design, you'll recognise the structure:
+Services contain the real implementation. They:
+
+- Are reusable classes with configuration
+- Return rich domain objects (models)
+- Can be called from anywhere (CLI, tests, other services)
+- May maintain state or connections
+
+```python
+# services/youtube.py
+
+class YouTubeTranscriptFetcher:
+    """Fetches transcripts from YouTube videos."""
+
+    def __init__(self, proxy_url: str | None = None):
+        self.proxy_url = proxy_url
+
+    async def fetch(
+        self,
+        video_id: str,
+        languages: list[str] | None = None
+    ) -> TranscriptResult:
+        """Fetch transcript with full metadata.
+
+        Returns a TranscriptResult containing the transcript text,
+        video metadata, and language information.
+        """
+        # Real implementation with error handling, retries, etc.
+        raw_transcript = await self._fetch_from_api(video_id, languages)
+        metadata = await self._fetch_metadata(video_id)
+
+        return TranscriptResult(
+            metadata=metadata,
+            transcript=Transcript(
+                full_text=self._format_transcript(raw_transcript),
+                segments=raw_transcript,
+                language=self._detect_language(raw_transcript),
+            ),
+        )
+```
+
+This is where complexity lives. Configuration, caching, error handling, retries, typed returns. And crucially: it's reusable without the LLM.
+
+### The Flow
+
+When the LLM decides to fetch a transcript:
+
+```
+LLM decides to call "fetch_video_transcript"
+    ↓
+tools/youtube.py::fetch_video_transcript(video_id)
+    ↓
+services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
+    ↓
+Returns TranscriptResult object
+    ↓
+Tool formats as string for LLM
+```
+
+### Why This Matters
+
+**1. Reusability** - Services can be called from the CLI directly, from tests, or from scripts, without going through the LLM:
+
+```python
+# Use from CLI, bypassing agents entirely
+@click.command()
+def download_transcript(video_id: str, output: str):
+    fetcher = YouTubeTranscriptFetcher()
+    result = fetcher.fetch(video_id)
+    Path(output).write_text(result.transcript.full_text)
+
+# Use in tests without mocking LLM
+def test_fetcher_handles_unavailable_videos():
+    fetcher = YouTubeTranscriptFetcher()
+    with pytest.raises(TranscriptDisabledError):
+        fetcher.fetch("video_with_disabled_transcript")
+
+# Use in batch processing
+async def process_videos(video_ids: list[str]):
+    fetcher = YouTubeTranscriptFetcher()
+    results = await asyncio.gather(*[fetcher.fetch(id) for id in video_ids])
+    return results
+```
+
+**2. Testability** - Services return typed objects that are easy to assert against. Tools return formatted strings which are harder to validate:
+
+```python
+# Testing a service - clear assertions
+def test_fetcher_returns_transcript():
+    result = fetcher.fetch("abc123")
+    assert result.transcript.full_text
+    assert result.metadata.video_id == "abc123"
+    assert result.transcript.language in ["en", "en-US"]
+
+# Testing a tool - string parsing required
+def test_tool_formats_correctly():
+    output = fetch_video_transcript("abc123")
+    assert "## " in output  # Has title?
+    assert "Transcript" in output  # Has section header?
+    # Much harder to validate structure
+```
+
+**3. Separation of Concerns** - Tool code handles "how to present to LLM", service code handles "how to actually do it". When YouTube's API changes, only `services/youtube.py` needs updating. When we want different output formatting, only the tool changes.
+
+This isn't theoretical—I've refactored the YouTube service twice without touching tool definitions or agent logic. That's only possible with clear boundaries.
+
+## The Layered Architecture
+
+The tools/services split is one boundary. But a complete agent system needs more structure. After some experimentation, I settled on a layered architecture that cleanly separates concerns; six layers, each with a single, well-defined responsibility. If you're familiar with Domain-Driven Design, you'll recognise the structure:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                   application/                          │
-│              User-facing command interface              │
+│                   presentation/                         │
+│              User-facing command interface              |
+|                   (e.g. CLI, Web, API)                  │
 │                                                         │
 │                   [Presentation Layer]                  │
 └─────────────────────────────────────────────────────────┘
@@ -158,11 +321,68 @@ We settled on six layers, each with a single, well-defined responsibility. If yo
 └─────────────────────────────────────────────────────────┘
 ```
 
-The DDD mapping isn't forced - it emerges naturally because agent systems have the same concerns as any complex application:
+Here's what this looks like in practice:
+
+```python
+# presentation/cli.py - Presentation layer
+@click.command()
+def search(query: str):
+    """Search for videos on YouTube."""
+    agent = create_search_agent()
+    result = agent.run(query)
+    click.echo(result)
+
+
+# agents/search.py - Agent layer (configuration only)
+def create_search_agent() -> ChatAgent:
+    """Factory function that creates a Search Agent."""
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
+
+
+# tools/youtube.py - Tool layer (thin LLM adapter)
+async def search_youtube_formatted(query: str) -> str:
+    """Search YouTube for videos matching the query."""
+    results = await search_youtube(query)  # Calls service
+    return format_for_llm(results)         # Formats for LLM
+
+
+# services/youtube.py - Service layer (business logic)
+async def search_youtube(query: str) -> list[VideoResult]:
+    """Search YouTube - returns rich domain objects."""
+    url = build_search_url(query)
+    html = await fetch_html(url)  # calls infra
+    return parse_video_results(html)
+
+
+# models/youtube.py - Model layer (domain objects)
+@dataclass
+class VideoResult:
+    video_id: str
+    title: str
+    channel: str
+
+
+# infra/http_client.py - Infrastructure layer (HTTP transport)
+async def fetch_html(url: str, timeout: float = 10.0) -> str:
+    """Fetch HTML content with browser-like headers."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
+        response.raise_for_status()
+        return response.text
+```
+
+Each layer has a single responsibility: agents configure behaviour, tools adapt for LLMs, services implement logic, models define structure. Testing is straightforward - mock at the layer boundary, not deep inside.
+
+The DDD mapping isn't forced - it emerges naturally because agentic systems have the same concerns as any complex application:
 
 | Layer | DDD Concept | Agent System Role |
 |-------|-------------|-------------------|
-| `application/` | Presentation | User interaction, output formatting |
+| `presentation/` | Presentation | User interaction, output formatting |
 | `agents/` | Application | Orchestrates workflows, coordinates domain operations |
 | `tools/` | Anti-Corruption Layer | Translates between LLM interface and domain language |
 | `services/` | Domain | Core business logic, domain rules, the "what" |
@@ -173,154 +393,74 @@ The `tools/` layer as an Anti-Corruption Layer is particularly interesting. In D
 
 The flow is strictly downward. Agents use tools. Tools call services. Services work with models. This constraint forces clear thinking about where code belongs.
 
----
+### When This Architecture Matters
+Is this overkill for simple projects? Maybe. But consider when you need it:
+- You're building more than a demo - If this will run in production, maintainability matters from day one.
+- You're using AI coding assistants - Tools like GitHub Copilot and Claude Code work significantly better with well-structured code. Clear boundaries and consistent patterns make AI-assisted development more effective.
+- Multiple people will work on it - Clear boundaries make collaboration possible. Different developers can own different services.
+- You need to test it properly - Without the tools/services split, testing requires mocking LLMs or running expensive agent calls.
+- The domain is complex - Multiple external APIs, complex business logic, rich data models. The architecture scales with complexity.
+- You'll extend it - Adding new capabilities shouldn't require refactoring existing code. The layered architecture supports extension.
 
-## Tools vs Services: The Key Distinction
+I've found that the "mess" in agentic systems happens gradually. You start with inline tools because it's faster. Then you need to reuse one. Then you need to test something. Then you need error handling. Each change makes the code more tangled.
 
-This is the most important architectural decision to understand.
+By the time you realize you need better architecture, refactoring is painful. I've learned this the hard way—I once asked an AI assistant to help refactor a tangled codebase and spent hours in debugging hell. The AI confidently propagated the existing confusion into new, subtly broken code. Starting with clear layers costs more upfront but saves significant pain later.
 
-When an LLM "calls a tool", it's really doing two things: **invoking a function** and **interpreting the result**. The function needs to accept simple parameters (strings, numbers) and return text the LLM can reason about. That's it.
+### Architecture in the Age of AI Coding Assistants
+There's another dimension to this that's become increasingly relevant: well-architected code works better with AI coding assistants.
 
-But the actual work - searching YouTube, parsing HTML, handling errors - is complex. It involves configuration, error handling, and returns rich objects with multiple fields.
+As tools like GitHub Copilot, Cursor, and Claude Code become standard parts of development workflows, I've noticed something interesting: they're much more effective when working with clearly structured code than with greenfield or tangled codebases; especially when paired with a documentation to provide context.
 
-We split these concerns:
+When I ask Claude Code to "implement a feature to filter search results by minimum duration," it knows exactly where to look: `services/youtube.py`. The service has clear boundaries, typed interfaces, and follows consistent patterns. The AI can reason about the change without needing to understand the entire system.
 
-### Tools = LLM Interface
+Compare this to asking it to modify inline tools scattered across orchestration code. The AI needs to:
 
-Tools are thin wrappers. They:
+- Figure out where the tool is defined
+- Understand how it's coupled to the agent
+- Determine if changes will break other parts
+- Navigate tangled dependencies
 
-- Accept simple parameters (strings, numbers, booleans)
-- Call the appropriate service
-- Format the result as a string the LLM can understand
-- Are stateless
+The same architectural principles that make code maintainable for humans make it navigable for AI assistants:
+- Clear boundaries - The AI can focus on one layer without understanding the entire stack. "Modify the tool" vs "modify the service" are distinct, scoped tasks.
+- Consistent patterns - Once the AI understands the pattern (tools call services, services return typed objects), it can apply that pattern consistently across changes.
+- Explicit types - Type hints aren't just documentation - they're constraints the AI can use to generate correct code. When TranscriptResult has a defined structure, the AI knows what fields are available.
+- Single responsibility - Each component does one thing. The AI doesn't need to reason about multiple concerns when modifying a service.
 
-```python
-# tools/transcript.py
+This isn't about making code "AI-friendly" at the expense of good design. It's that good design principles—the same ones we've refined over decades—happen to be exactly what makes code comprehensible to AI systems.
 
-async def fetch_video_transcript(
-    video_id: Annotated[str, Field(description="YouTube video ID")]
-) -> str:
-    """Fetch the transcript for a YouTube video.
+As AI coding assistants become more prevalent, architectural discipline becomes even more valuable. The codebases that benefit most from AI assistance are the ones that are already well-structured. The messy codebases stay messy, because the AI amplifies the existing patterns—good or bad.
 
-    Returns the full transcript text with video metadata.
-    """
-    result = await fetch_transcript(video_id)  # calls service
+### A Note on Testing
 
-    return f"""## {result.metadata.title}
-Channel: {result.metadata.channel}
-Duration: {result.metadata.duration}
+A natural benefit of the layered architecture is testability. With clear boundaries between layers, testing strategy becomes straightforward.
 
-### Transcript
-{result.transcript.full_text}
-"""
-```
-
-Notice what the tool does NOT do:
-- No configuration management
-- No error handling beyond basic formatting
-- No complex return types
-- No business logic
-
-### Services = Business Logic
-
-Services contain the real implementation. They:
-
-- Are reusable classes with configuration
-- Return rich domain objects (models)
-- Can be called from anywhere (CLI, tests, other services)
-- May maintain state or connections
-
-```python
-# services/youtube.py
-
-class YouTubeTranscriptFetcher:
-    """Fetches transcripts from YouTube videos."""
-
-    def __init__(self, proxy_url: str | None = None):
-        self.proxy_url = proxy_url
-
-    async def fetch(
-        self,
-        video_id: str,
-        languages: list[str] | None = None
-    ) -> TranscriptResult:
-        """Fetch transcript with full metadata.
-
-        Returns a TranscriptResult containing the transcript text,
-        video metadata, and language information.
-        """
-        # Real implementation with error handling, retries, etc.
-        raw_transcript = await self._fetch_from_api(video_id, languages)
-        metadata = await self._fetch_metadata(video_id)
-
-        return TranscriptResult(
-            metadata=metadata,
-            transcript=Transcript(
-                full_text=self._format_transcript(raw_transcript),
-                segments=raw_transcript,
-                language=self._detect_language(raw_transcript),
-            ),
-        )
-```
-
-### The Flow
-
-When the LLM decides to fetch a transcript:
+The principle we follow: **mock at the system boundary, not internally**.
 
 ```
-LLM decides to call "fetch_video_transcript"
-    ↓
-tools/transcript.py::fetch_video_transcript(video_id)
-    ↓
-services/youtube.py::YouTubeTranscriptFetcher.fetch(video_id)
-    ↓
-Returns TranscriptResult object
-    ↓
-Tool formats as string for LLM
+┌─────────────────────────────────────────────┐
+│  agents/  →  tools/  →  services/           │  ← Test with REAL code
+└─────────────────────────────────────────────┘
+                              ↓
+                    ┌─────────────────┐
+                    │ External APIs   │  ← MOCK here
+                    │ - YouTube API   │
+                    │ - Azure OpenAI  │
+                    └─────────────────┘
 ```
 
-### Why This Matters
+Don't mock your own services. If you're testing `TranscriptSummarizer`, inject a mock OpenAI client - but let the real service logic execute. If you're testing storage, use a temp directory - but exercise the real file I/O.
 
-**1. Reusability** - Services can be called from the CLI directly, from tests, or from scripts, without going through the LLM:
-
-```python
-# CLI command that bypasses the agent entirely
-@click.command()
-def download_transcript(video_id: str, output: str):
-    fetcher = YouTubeTranscriptFetcher()
-    result = fetcher.fetch(video_id)
-    Path(output).write_text(result.transcript.full_text)
-```
-
-**2. Testability** - Services return typed objects that are easy to assert against. Tools return formatted strings which are harder to validate:
-
-```python
-# Testing a service - clear assertions
-def test_fetcher_returns_transcript():
-    result = fetcher.fetch("abc123")
-    assert result.transcript.full_text
-    assert result.metadata.video_id == "abc123"
-    assert result.transcript.language in ["en", "en-US"]
-
-# Testing a tool - string parsing required
-def test_tool_formats_correctly():
-    output = fetch_video_transcript("abc123")
-    assert "## " in output  # Has title?
-    assert "Transcript" in output  # Has section header?
-    # Much harder to validate structure
-```
-
-**3. Separation of Concerns** - Tool code handles "how to present to LLM", service code handles "how to actually do it". When YouTube's API changes, only `services/youtube.py` needs updating. When we want different output formatting, only the tool changes.
+This gives higher confidence (real code paths), less brittle tests (fewer mocks to maintain), and catches the integration bugs that slip through pure unit tests.
 
 ---
 
 ## Domain-Driven Organisation
 
-With the tools/services split established, the next question is: how should we organise the `services/` package - our Domain Layer?
+With our layer structure established, the next question is: how should we organise code *within* each layer? Let's look at the `services/` package as an example—the same thinking process applies throughout, though different layers may arrive at different answers.
 
-This is where another DDD concept becomes directly applicable: **Bounded Contexts**.
+This is where a DDD concept becomes directly applicable: **Bounded Contexts**.
 
-We had two options:
+I considered the following options:
 
 **Option A: By Function**
 ```
@@ -339,7 +479,7 @@ services/
 └── storage.py          # Persistence
 ```
 
-We chose Option B. Here's why.
+I chose Option B. Here's why.
 
 ### Bounded Contexts
 
@@ -356,11 +496,12 @@ Both search and transcript fetching operate within this context. They share:
 
 Grouping them together provides:
 
-**Cohesion** - Related code stays together. When debugging transcript issues, you don't need to check multiple files.
+- **Cohesion** - Related code stays together. When debugging transcript issues, you don't need to check multiple files.
 
-**Replaceability** - Want to add Vimeo support? Create `services/vimeo.py` with the same interface. The rest of the system doesn't change.
+- **Replaceability** - Want to add Vimeo support? Create `services/vimeo.py` with the same interface. The rest of the system doesn't change.
 
-**Discoverability** - "Where's YouTube logic?" → `services/youtube.py`. Simple.
+- **Discoverability** - "Where's YouTube logic?" → `services/youtube.py`. Simple.
+- **AI Comprehension** - Consistent domain language means AI assistants share your vocabulary. When everything YouTube-related uses "video_id" and "channel", the AI can reason about changes without confusion.
 
 ### The Litmus Test
 
@@ -373,6 +514,10 @@ When deciding where code belongs, ask: "If I replaced this external system, what
 | Replace Azure OpenAI with Anthropic | `services/summarizer.py` |
 
 Each domain boundary represents a potential replacement point. If multiple files would need to change for a single external system swap, your boundaries might be wrong.
+
+We apply this bounded context principle to our domain and anti-corruption layers. The `services/`, `tools/`, and `models/` packages each have a `youtube.py` file that groups YouTube-related functionality. This consistency makes navigation predictable: "Where's YouTube logic?" → check `youtube.py` in any of these layers.
+
+This has a secondary benefit for AI-assisted development: **discoverability**. When an LLM needs to understand or modify YouTube-related code, consistent naming means it can find the right files without guessing. And larger, cohesive modules aren't a bad thing—the model can read one file and have full context, rather than piecing together information scattered across many small files.
 
 ---
 
@@ -397,6 +542,18 @@ The answer is predictability and debuggability. When something goes wrong:
 - If search results are irrelevant, check SearchAgent
 
 Mixed responsibilities make debugging harder. "Is it a search problem or a transcript problem?" becomes a common question when agents do multiple things.
+
+### Why Not a YouTubeAgent?
+
+You might notice an apparent inconsistency. We just argued for organizing `services/`, `tools/`, and `models/` by bounded context—each has a `youtube.py` file. So why don't we have a YouTubeAgent that handles both search and transcripts?
+
+The answer lies in what each layer does:
+
+- **Domain layers** (services, models) and the **anti-corruption layer** (tools) are organized by *external system*. These layers contain domain concepts like "video_id" and "channel", and grouping by bounded context makes the system easier to understand and replace.
+
+- **Agents** are an *orchestration layer*—they define jobs and coordinate work. An agent is more like a role than a system boundary. SearchAgent's job is finding videos. TranscriptAgent's job is fetching transcripts. These are different jobs that happen to use the same external system.
+
+We don't call SummarizeAgent "AzureOpenAIAgent" even though it uses Azure OpenAI. The agent's identity comes from what it *does*, not what system it *uses*. This keeps debugging simple: one job, one agent, one place to look when things go wrong.
 
 ### The Orchestrator Pattern
 
@@ -426,22 +583,29 @@ This separation means we can test each specialist agent independently, with clea
 An agent definition is surprisingly simple. Here's the SearchAgent:
 
 ```python
-class SearchAgent:
-    """Agent specialized for YouTube video search."""
+#agents/search_agent.py
 
-    def get_agent(self) -> ChatAgent:
-        return ChatAgent(
-            name="SearchAgent",
-            instructions="""You are a YouTube Search Agent.
-            Your job is to find relevant YouTube videos based on user queries.
-            Use the search_youtube tool to find videos.
-            You ONLY search - you do not fetch transcripts or summarize.""",
-            tools=[search_youtube_formatted],  # Tool from tools/ layer
-        )
+SEARCH_AGENT_INSTRUCTIONS = """You are a YouTube Search Agent. Your job is to find relevant YouTube videos based on user queries.
+
+When asked to search:
+1. Use the search_youtube tool to find videos
+2. Return the results clearly formatted
+3. Highlight which videos seem most relevant to the query
+
+You only search - you do not fetch transcripts or summarize. Other agents handle those tasks."""
+
+def create_search_agent() -> ChatAgent:
+    """Factory function that creates a Search Agent."""
+    return ChatAgent(
+        chat_client=get_chat_client(),
+        name="SearchAgent",
+        instructions=SEARCH_AGENT_INSTRUCTIONS,
+        tools=[search_youtube_formatted],
+    )
 ```
 
 Notice the pattern:
-- **Instructions** define the agent's persona and boundaries
+- **Instructions** are extracted as module-level constants for clarity. Alternatively, you could load prompts from external files (e.g., `prompts/search_agent.txt`), which makes iterating on prompts easier without touching Python code
 - **Tools** are functions from the `tools/` layer (which call services)
 - The agent doesn't know about YouTube APIs - it just calls tools
 
@@ -453,12 +617,39 @@ The orchestrator follows the same pattern, but its tools delegate to other agent
 class OrchestratorAgent:
     """Coordinates sub-agents for YouTube research tasks."""
 
+    def __init__(self) -> None:
+        self._agents: dict[str, ChatAgent] = {}
+        # Agent factory registry for lazy initialization
+        self._agent_factories = {
+            "search": create_search_agent,
+            "transcript": create_transcript_agent,
+            "summarize": create_summarize_agent,
+            "writer": create_writer_agent,
+        }
+
+    def _get_agent(self, name: str) -> ChatAgent:
+        """Get or create an agent by name (lazy initialization)."""
+        if name not in self._agents:
+            self._agents[name] = self._agent_factories[name]()
+        return self._agents[name]
+
+    async def _delegate(self, agent_name: str, request: str) -> str:
+        """Delegate a request to a sub-agent."""
+        agent = self._get_agent(agent_name)
+        result = await agent.run(request)
+        return result.text
+
+    async def ask_search_agent(self, request: str) -> str:
+        """Delegate a search request to the Search Agent."""
+        return await self._delegate("search", request)
+
+    # ... similar for transcript, summarize, writer
+
     def get_orchestrator(self) -> ChatAgent:
         return ChatAgent(
+            chat_client=get_chat_client(),
             name="Orchestrator",
-            instructions="""You coordinate YouTube research tasks.
-            You have access to specialist agents - delegate to them.
-            Never try to search YouTube or fetch transcripts yourself.""",
+            instructions=ORCHESTRATOR_INSTRUCTIONS,
             tools=[
                 self.ask_search_agent,
                 self.ask_transcript_agent,
@@ -466,89 +657,249 @@ class OrchestratorAgent:
                 self.ask_writer_agent,
             ],
         )
-
-    async def ask_search_agent(self, request: str) -> str:
-        """Delegate a search request to the Search Agent."""
-        agent = SearchAgent().get_agent()
-        result = await agent.run(request)
-        return result.text
-
-    async def ask_transcript_agent(self, request: str) -> str:
-        """Delegate a transcript request to the Transcript Agent."""
-        agent = TranscriptAgent().get_agent()
-        result = await agent.run(request)
-        return result.text
-
-    # ... similar for summarize and writer
 ```
+
+Notice we use a class here instead of a simple factory function. This is intentional: the orchestrator needs to maintain state—specifically, a cache of lazily-initialized sub-agents. This avoids recreating agents on every delegation while keeping initialization costs deferred until first use.
 
 The orchestrator's "tools" are delegation functions. When the LLM decides to search, it calls `ask_search_agent`, which runs the SearchAgent and returns its result. The orchestrator sees the result and decides what to do next.
 
 This is the hub-and-spoke pattern:
 
 ```
-                    ┌─────────────┐
-                    │ Orchestrator│
-                    │   (LLM)     │
-                    └──────┬──────┘
-                           │
-         ┌─────────────────┼─────────────────┐
-         │                 │                 │
-         ▼                 ▼                 ▼
-    ┌─────────┐      ┌─────────┐      ┌─────────┐
-    │ Search  │      │Transcript│     │Summarize│
-    │  Agent  │      │  Agent  │      │  Agent  │
-    └─────────┘      └─────────┘      └─────────┘
+                   ┌─────────────┐
+                   │ Orchestrator│
+                   │   (LLM)     │
+                   └──────┬──────┘
+                          │
+       ┌────────────┬─────┴─────┬───────────┐
+       │            │           │           │
+       ▼            ▼           ▼           ▼
+  ┌─────────┐ ┌──────────┐ ┌─────────┐ ┌─────────┐
+  │ Search  │ │Transcript│ │Summarize│ │  Writer │
+  │  Agent  │ │  Agent   │ │  Agent  │ │  Agent  │
+  └─────────┘ └──────────┘ └─────────┘ └─────────┘
 ```
 
-Every interaction flows through the center. The orchestrator accumulates context from each step, maintaining the full conversation history.
+Every interaction flows through the centre. The orchestrator accumulates context from each step, maintaining the full conversation history.
 
 ### Context Injection
 
-One subtle but important pattern: the orchestrator needs to know what transcripts are already cached to make smart decisions. We use a `TranscriptContextProvider` that injects this information before each LLM call:
+One subtle but important pattern: the orchestrator needs to know what transcripts are already cached to make smart decisions. The Microsoft Agent Framework provides a `ContextProvider` base class for this—we implement `invoking()` to inject context before each LLM call:
 
 ```python
-class TranscriptContextProvider:
+from agent_framework._memory import Context, ContextProvider
+
+class TranscriptContextProvider(ContextProvider):
     """Provides context about stored transcripts to the orchestrator."""
 
-    def get_context(self) -> str:
-        stored = self.storage.list_transcripts()
-        if not stored:
-            return "No transcripts currently stored."
+    async def invoking(self, messages, **kwargs) -> Context:
+        """Called before each LLM invocation."""
+        video_ids = self._storage.list_videos()
+
+        if not video_ids:
+            return Context(instructions="No transcripts currently stored.")
 
         lines = ["You have these transcripts available:"]
-        for t in stored:
-            status = "summarized" if t.has_summary else "not summarized"
-            lines.append(f"- {t.title} ({t.video_id}): {status}")
+        for vid in video_ids:
+            stored = self._storage.load(vid)
+            if stored:
+                status = "summarized" if stored.summary else "not summarized"
+                lines.append(f"- {stored.metadata.title} ({vid}): {status}")
 
-        return "\n".join(lines)
+        return Context(instructions="\n".join(lines))
 ```
+
+The framework calls `invoking()` before each LLM request, and the returned `Context` is merged into the agent's instructions.
+
+It's worth noting that this is separate from *conversation memory*—the back-and-forth dialogue history between user and agent. The framework handles conversation memory automatically, typically through a thread or session mechanism. The `messages` parameter passed to `invoking()` already contains this history.
+
+The `ContextProvider` pattern addresses a different need: injecting *domain state* that exists outside the conversation. Our storage layer persists transcripts to disk, but the LLM has no way of knowing what's there unless we tell it. By querying storage and formatting the results as instructions, we bridge the gap between our application's state and the LLM's context window.
+
+This separation is intentional. Conversation memory answers "what have we discussed?", while domain context answers "what resources exist?". The framework manages the former; we're responsible for the latter.
 
 Now the orchestrator can reason: "The user wants a summary, and I already have the transcript cached, so I'll skip fetching and go straight to SummarizeAgent."
 
 ---
 
-## A Note on Testing
+## Seeing It in Action
 
-A natural benefit of the layered architecture is testability. With clear boundaries between layers, testing strategy becomes straightforward.
+Theory is useful, but there's nothing like seeing the system actually run. Let's walk through what happens when we make a real request to the orchestrator.
 
-The principle we follow: **mock at the system boundary, not internally**.
+Here's our test request:
 
 ```
-┌─────────────────────────────────────────────┐
-│  agents/  →  tools/  →  services/           │  ← Test with REAL code
-└─────────────────────────────────────────────┘
-                              ↓
-                    ┌─────────────────┐
-                    │ External APIs   │  ← MOCK here
-                    │ - YouTube API   │
-                    │ - Azure OpenAI  │
-                    └─────────────────┘
+I want to cook a pork loin roast on a Kamado grill/smoker.
+I would like some info on how to do this based on techniques on YouTube.
+Some channels I trust are fork and embers and chuds bbq.
+Ideally, I need to know the temperature, the grill setup, the internal
+temperature and the time.
+Save the results to pork_loin_guide.md
 ```
 
-Don't mock your own services. If you're testing `TranscriptSummarizer`, inject a mock OpenAI client - but let the real service logic execute. If you're testing storage, use a temp directory - but exercise the real file I/O.
+This request exercises the full pipeline: search, transcript fetching, summarization, and file writing. It's specific enough to be reproducible but open-ended enough to allow the orchestrator flexibility in execution strategy.
 
-This gives higher confidence (real code paths), less brittle tests (fewer mocks to maintain), and catches the integration bugs that slip through pure unit tests.
+When we run this through the orchestrator with logging enabled, we can observe the full decision-making flow. The logs below are cleaned up for clarity—the actual debug output includes framework internals and full response payloads—but the core flow is preserved:
+
+```
+10:42:15 [INFO] orchestrator: Received request: I want to cook a pork loin...
+10:42:15 [DEBUG] orchestrator: Checking transcript context...
+10:42:15 [DEBUG] context: No transcripts currently stored
+10:42:15 [DEBUG] orchestrator: Calling Azure OpenAI...
+
+10:42:17 [INFO] orchestrator: Delegating to SearchAgent
+10:42:17 [DEBUG] search_agent: Searching YouTube for: pork loin kamado fork embers chuds bbq
+10:42:18 [INFO] youtube_service: Found 5 videos matching query
+10:42:18 [DEBUG] search_agent: Returning formatted results
+
+10:42:19 [INFO] orchestrator: Delegating to TranscriptAgent
+10:42:19 [DEBUG] transcript_agent: Fetching transcript for video fI86yXKlnQA
+10:42:20 [INFO] youtube_service: Fetched transcript (4,521 words)
+10:42:20 [DEBUG] storage_service: Saved transcript to data/transcripts/fI86yXKlnQA.json
+10:42:20 [DEBUG] transcript_agent: Transcript cached and returned
+
+10:42:21 [INFO] orchestrator: Delegating to TranscriptAgent
+10:42:21 [DEBUG] transcript_agent: Fetching transcript for video FsbwQI-EI-k
+10:42:22 [INFO] youtube_service: Fetched transcript (3,892 words)
+10:42:22 [DEBUG] storage_service: Saved transcript to data/transcripts/FsbwQI-EI-k.json
+
+10:42:23 [INFO] orchestrator: Delegating to SummarizeAgent
+10:42:23 [DEBUG] summarize_agent: Summarizing 2 transcripts (8,413 total words)
+10:42:26 [INFO] summarize_service: Generated summary (847 words)
+
+10:42:27 [INFO] orchestrator: Delegating to WriterAgent
+10:42:27 [DEBUG] writer_agent: Writing to output/pork_loin_guide.md
+10:42:27 [INFO] storage_service: File written successfully
+
+10:42:27 [INFO] orchestrator: Request completed (12.4s)
+```
+
+### What's Happening Here
+
+The logs reveal the orchestrator pattern in motion:
+
+1. **Context Check**: The orchestrator first checks for cached transcripts. Finding none, it knows it needs to search and fetch.
+
+2. **SearchAgent Delegation**: The orchestrator decides it needs videos, so it delegates to SearchAgent. Notice the clean boundary—the orchestrator says "find videos about X", not "call the YouTube API with these parameters."
+
+3. **TranscriptAgent Delegation** (×2): For each relevant video, the orchestrator delegates to TranscriptAgent. The agent handles fetching, caching, and formatting—the orchestrator just sees results.
+
+4. **SummarizeAgent Delegation**: With transcripts in hand, the orchestrator passes the text to SummarizeAgent. The summarizer doesn't know about YouTube—it just receives text and produces a summary.
+
+5. **WriterAgent Delegation**: Finally, the orchestrator asks WriterAgent to save the result. Again, clean delegation—the orchestrator provides content and a filename, the agent handles the rest.
+
+### The Output
+
+The final markdown file demonstrates what we get from this orchestration:
+
+```markdown
+# Pork Loin Roast on a Kamado (YouTube-Technique Guide)
+
+**Date:** 2025-01-11
+**Source:** YouTube technique summaries (videos linked below)
+
+## Key targets (temps & doneness)
+
+- **Pit / dome temp (indirect smoking):** **250–275°F** (121–135°C)
+- **Internal temp targets (pork loin):**
+  - **Pull at 140–145°F** (60–63°C) for juicy slices
+  - If you prefer more done: **150°F** (66°C)
+- **Rest:** **10–20 minutes** (loosely tented)
+
+## Recommended kamado setups
+
+### Setup A — Indirect "smoke-then-finish" (most consistent)
+1. **Charcoal:** quality lump; add 1–3 chunks of mild fruit wood
+2. **Heat deflectors:** installed for indirect cooking
+3. **Target pit temp:** stabilize at **250–275°F**
+
+...
+
+## Video references
+- **Fork & Embers** — Pork loin roast method
+- **Chuds BBQ** — Temp-control + finishing approach
+```
+
+The orchestrator synthesised information from multiple YouTube videos into a coherent, actionable reference document. Each agent contributed its specialty: SearchAgent found the right videos, TranscriptAgent retrieved the content, SummarizeAgent extracted the key information, and WriterAgent saved the result.
+
+### Iterative Refinement
+
+Because the orchestrator maintains conversation history, we can continue the dialogue to refine results:
+
+```
+User: Can you add a section comparing direct vs indirect cooking methods?
+User: The temperatures seem low - can you check if Chuds mentions a hotter approach?
+User: Save a version without the glaze instructions for my friend who doesn't like sweet.
+```
+
+Each follow-up leverages the cached transcripts—no need to re-fetch from YouTube. The orchestrator remembers what it has, reasons about what's needed, and delegates accordingly. This conversational loop is where the agent pattern really shines: the system adapts to feedback without starting from scratch.
+
+### What We Don't See (And Why That Matters)
+
+Just as important as what appears in the logs is what *doesn't*:
+
+- **No YouTube API details** in the orchestrator logs—that's encapsulated in the service layer
+- **No OpenAI prompt engineering** visible at the orchestration level—that's in the agent instructions
+- **No file I/O logic** leaking up—WriterAgent handles it internally
+
+Each layer handles its own concerns. The orchestrator reasons about *what* needs to happen; the agents and services handle *how*.
+
+### The Cost of Flexibility
+
+There's an important trade-off with the orchestrator pattern that only becomes visible when you run it multiple times: **variance**.
+
+The clean sequential flow shown above represents one possible execution. But run the same request again, and you might see a different pattern entirely.
+
+When benchmarking the same request across multiple runs, I observed LLM call counts ranging from **17 to 34 calls** for identical inputs. Why such variance? The orchestrator LLM makes different tactical decisions each time:
+
+| Decision Point | Observed Variance |
+|----------------|-------------------|
+| **Search strategy** | 1-3 searches, sequential or parallel |
+| **Summarization** | Sometimes skipped entirely, sometimes per-video |
+| **Delegation phrasing** | Different wording can cause downstream failures |
+
+With verbose logging enabled, we can see these decisions in action:
+
+```
+# Run A (17 calls) - Minimal approach
+SearchAgent called with: Kamado pork loin Fork and Embers
+SearchAgent called with: Chuds BBQ pork loin kamado
+TranscriptAgent called with: Fetch transcript for video FsbwQI-EI-k...
+TranscriptAgent called with: Fetch transcript for video 2AF1ysZ8eEA...
+TranscriptAgent called with: Fetch transcript for video fI86yXKlnQA...
+WriterAgent called with: Write a markdown file...  # Skipped summarization!
+
+# Run B (25 calls) - Thorough approach
+SearchAgent called with: Find YouTube videos where Fork and Embers...
+SearchAgent called with: Find YouTube videos where Chuds BBQ...
+SearchAgent called with: Find top YouTube videos about cooking pork loin...
+TranscriptAgent called with: ...
+SummarizeAgent called with: From the provided transcripts, extract...
+WriterAgent called with: ...
+```
+
+Run A decided the WriterAgent could synthesize directly from transcripts. Run B added a summarization step. Both produced valid outputs, but with different costs and potentially different quality.
+
+
+#### "Just Set Temperature to Zero?"
+
+A natural reaction to this variance is to reduce LLM temperature for more deterministic behaviour. I tested this:
+
+| Temperature | Range | Std Dev |
+|-------------|-------|---------|
+| 0.7 (default) | 17-34 | ~5.6 |
+| 0.0 (deterministic) | 25-35 | 5.29 |
+
+*Note: A fixed seed (42) was set for all runs.*
+
+Even with temperature=0 and a fixed seed, we observed **10 calls of variance** (25 to 35 calls). The unpredictability isn't primarily from sampling randomness—it's from the LLM making different *valid* strategic choices each run:
+
+- How many parallel searches to issue (1, 2, or 3)
+- Whether to summarize per-video or combined
+- Whether to skip summarization entirely and let the writer synthesize
+
+This variance is architectural. To reduce this, we either need to constrain each agent's scope so tightly that decisions become more consistent, or remove runtime decision-making entirely by planning upfront; alternatives will be explored in future posts.
+
+This isn't a bug—it's the inherent nature of letting an LLM decide the workflow at runtime. The orchestrator has flexibility to adapt its approach, but that flexibility comes with unpredictability. For conversational interfaces where adaptability matters, this trade-off is often worthwhile. For batch processing where predictability matters, other approaches may be better suited.
 
 ---
 
@@ -556,7 +907,7 @@ This gives higher confidence (real code paths), less brittle tests (fewer mocks 
 
 These principles apply regardless of which agent framework you choose:
 
-1. **Layer your architecture** - Presentation, Application, Domain, Infrastructure. Agent systems have the same concerns as any complex application.
+1. **Layer your architecture** - CLI, Agents, Services, Infrastructure. Agent systems have the same concerns as any complex application.
 
 2. **Separate tools from services** - Tools are the Anti-Corruption Layer between LLMs and your domain. Keep them thin. Let services do the real work.
 
@@ -564,31 +915,29 @@ These principles apply regardless of which agent framework you choose:
 
 4. **Single responsibility for agents** - Each agent does one thing well. Coordination happens in a dedicated orchestrator (for now - we'll revisit this in Part 2).
 
+5. **Expect variance with runtime orchestration** - When an LLM decides the workflow at runtime, identical inputs can produce different execution paths. Setting temperature to zero or using a seed won't necessarily fix this - the variance is architectural, not sampling randomness.
+
 ---
 
 ## View the Code
 
 All patterns described here are implemented in the reference codebase:
 
-- **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
+- **[Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - The architecture explored in this post
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
-- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
 
-The code is meant to be read and learned from, not just used. Star the repo if you find it useful! ⭐
 
 ---
 
 ## Conclusion
 
-The question I started with was: can you build a multi-agent system that doesn't become an unmaintainable mess?
+The ambition I started with was to demonstrate that agentic systems can be architected with the same discipline we apply to any serious software project. The orchestrator pattern we've explored here shows that's achievable.
 
-The answer is yes - and the approach isn't novel. It's applying the same principles we've used for decades in software engineering: layered architecture, separation of concerns, Domain-Driven Design, clear boundaries between components.
+The approach isn't novel—layered architecture, separation of concerns, Domain-Driven Design. What's interesting is how naturally these patterns map to agent systems. The Anti-Corruption Layer concept perfectly describes the tools/services split. Bounded contexts explain why YouTube search and transcript fetching belong together.
 
-What's interesting is that these patterns map so naturally to agent systems. The DDD layers emerge organically. The Anti-Corruption Layer concept perfectly describes the tools/services split. Bounded contexts explain why we group YouTube search and transcript fetching together.
+The key insight specific to agents: **tools and services have fundamentally different responsibilities**. Tools translate between the LLM's world (simple parameters, string outputs) and your domain's world (rich objects, business logic). Separating them unlocks clean, testable systems.
 
-Agent systems aren't magic. They're software systems with a particular interface (natural language) and a particular component (an LLM). The same engineering discipline applies.
-
-The key insight specific to agents: **tools and services have fundamentally different responsibilities**. Tools are an adapter layer - translating between the LLM's world (simple parameters, string outputs) and your domain's world (rich objects, business logic). Conflating them creates the mess I see in most agent code. Separating them unlocks clean, testable, maintainable systems.
+Agentic systems aren't magic. They're software systems with a natural language interface and an LLM component. The engineering discipline we've refined over decades still applies—you just need to think about where the boundaries are.
 
 ---
 

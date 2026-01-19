@@ -1,13 +1,13 @@
 """Data models and configuration."""
 
 from youtube_agent_orchestrator.models.config import Settings, get_settings
-from youtube_agent_orchestrator.models.search import VideoSearchResult
 from youtube_agent_orchestrator.models.storage import StoredTranscript
-from youtube_agent_orchestrator.models.transcript import (
+from youtube_agent_orchestrator.models.youtube import (
     Transcript,
     TranscriptResult,
     TranscriptSegment,
     VideoMetadata,
+    VideoSearchResult,
 )
 
 __all__ = [

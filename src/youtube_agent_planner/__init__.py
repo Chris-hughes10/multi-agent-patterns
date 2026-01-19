@@ -1,7 +1,7 @@
 """YouTube Agent Planner - DAG-based execution planning.
 
 This package provides explicit planning with DAG execution, separated from
-the youtube_autonomous_agents autonomous pattern for cleaner architecture.
+the youtube_goal_agents autonomous pattern for cleaner architecture.
 
 Available components:
 - PlannerAgent: Creates execution DAGs from user requests
@@ -10,7 +10,7 @@ Available components:
 """
 
 from youtube_agent_planner.agents.planner import PlannerAgent
-from youtube_agent_planner.patterns.dag_executor import (
+from youtube_agent_planner.infra.dag_executor import (
     DAGExecutor,
     DAGStep,
     ExecutionDAG,

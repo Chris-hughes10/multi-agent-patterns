@@ -10,7 +10,7 @@ from pathlib import Path
 
 from youtube_agent_orchestrator.models.config import get_settings
 from youtube_agent_orchestrator.models.storage import StoredTranscript
-from youtube_agent_orchestrator.models.transcript import TranscriptResult
+from youtube_agent_orchestrator.models.youtube import TranscriptResult
 
 
 class TranscriptStorage:
