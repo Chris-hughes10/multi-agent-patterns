@@ -299,7 +299,7 @@ Save the results to """
     # Pattern-specific output files (matching e2e tests)
     output_files = {
         "v1": "test_orchestrator_pork_loin.md",
-        "v2": "test_autonomous_pork_loin.md",
+        "v2": "test_goal_aware_pork_loin.md",
         "v3": "test_planner_pork_loin.md",
     }
 

@@ -291,9 +291,15 @@ class DAGExecutor:
         :param dag: The DAG to execute
         :raises StepExecutionError: If a step fails
         """
+        logger.info("[Executor] Starting DAG execution")
+
         while not dag.is_complete():
             # Get all ready steps
             ready_steps = dag.get_ready_steps(self._completed_steps)
+            if ready_steps:
+                step_names = [s.id for s in ready_steps]
+                parallel_note = " (parallel)" if len(ready_steps) > 1 else ""
+                logger.info(f"[Executor] Ready steps: {', '.join(step_names)}{parallel_note}")
 
             if not ready_steps:
                 # No ready steps but DAG not complete - might be stuck
@@ -318,6 +324,15 @@ class DAGExecutor:
                 return_exceptions=False,
             )
 
+        # Log completion summary
+        completed = len([s for s in dag.steps if s.status == StepStatus.COMPLETED])
+        failed = len([s for s in dag.steps if s.status == StepStatus.FAILED])
+        total = len(dag.steps)
+        if failed:
+            logger.info(f"[Executor] DAG finished: {completed}/{total} succeeded, {failed} failed")
+        else:
+            logger.info(f"[Executor] DAG complete: {completed}/{total} steps succeeded")
+
     async def _execute_step(self, step: DAGStep) -> None:
         """Execute a single step.
 
@@ -328,6 +343,7 @@ class DAGExecutor:
 
         step.status = StepStatus.RUNNING
         start_time = time.time()
+        logger.info(f"[{step.agent_name}] Executing: {step.description[:60]}")
 
         # Resolve variable references in input
         try:
@@ -377,6 +393,8 @@ class DAGExecutor:
                 step.result = result.data
                 self._completed_steps.add(step.id)
                 self._step_results[step.id] = result.data
+                elapsed = (time.time() - start_time) * 1000
+                logger.info(f"[{step.agent_name}] ✓ {step.id} completed ({elapsed:.0f}ms)")
 
                 # Store in session for variable resolution
                 self._session.store(
@@ -392,6 +410,7 @@ class DAGExecutor:
                 step.error = result.error
                 exec_step.action = "error"
                 exec_step.error = result.error
+                logger.info(f"[{step.agent_name}] ✗ {step.id} failed: {result.error}")
                 raise StepExecutionError(step.id, result.error or "Unknown error")
 
         except StepExecutionError:

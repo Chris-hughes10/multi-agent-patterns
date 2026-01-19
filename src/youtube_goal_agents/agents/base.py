@@ -154,14 +154,22 @@ class BaseAgent(ABC):
 
         intent = task.context.get("intent", task.description)
 
-        prompt = f"""You are the {self.name} agent. Your role: {self.description}
+        prompt = f"""You are the "{self.name}" agent in a multi-agent system.
+
+YOUR ROLE: {self.description}
+YOUR CAPABILITIES: {', '.join(self.capabilities)}
+
+You have tools that allow you to perform these capabilities. You are NOT limited by what an LLM can do - you have actual tools and APIs available.
 
 A task has been routed to you:
 INTENT: "{intent}"
 
 Should you handle this task?
-- Answer YES if this task matches your capabilities and role
-- Answer NO if this task should be handled by a different agent
+- Answer YES if ANY part of the task involves your capabilities ({', '.join(self.capabilities)})
+- Answer YES even if the task ALSO mentions other steps (like summarizing or writing) - you'll do YOUR part and hand off the rest
+- Answer NO only if NONE of your capabilities are needed at all
+
+IMPORTANT: Multi-step tasks are normal. If the task says "fetch transcripts, then summarize" and you're the transcript agent, answer YES - you'll fetch transcripts and hand off summarization to another agent.
 
 Respond in this exact format:
 DECISION: YES or NO

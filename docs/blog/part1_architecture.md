@@ -937,7 +937,7 @@ The approach isn't novel—layered architecture, separation of concerns, Domain-
 
 The key insight specific to agents: **tools and services have fundamentally different responsibilities**. Tools translate between the LLM's world (simple parameters, string outputs) and your domain's world (rich objects, business logic). Separating them unlocks clean, testable systems.
 
-Agent systems aren't magic. They're software systems with a natural language interface and an LLM component. The engineering discipline we've refined over decades still applies—you just need to think about where the boundaries are.
+Agentic systems aren't magic. They're software systems with a natural language interface and an LLM component. The engineering discipline we've refined over decades still applies—you just need to think about where the boundaries are.
 
 ---
 

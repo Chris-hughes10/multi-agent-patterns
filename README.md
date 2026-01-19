@@ -227,7 +227,7 @@ See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural
 
 ## V2: Goal-Aware Multi-Agent System
 
-YouTube Agent V2 (`youtube-autonomous`) uses **goal-aware agents with dispatcher-based routing** - an LLM router assigns tasks, but agents can validate and reject assignments with reasoning.
+YouTube Agent V2 (`youtube-goal-aware`) uses **goal-aware agents with dispatcher-based routing** - an LLM router assigns tasks, but agents can validate and reject assignments with reasoning.
 
 ### How It Works
 
@@ -273,26 +273,26 @@ YouTube Agent V2 (`youtube-autonomous`) uses **goal-aware agents with dispatcher
 
 ```bash
 # List registered agents
-uv run youtube-autonomous agents
+uv run youtube-goal-aware agents
 
 # Simple commands
-uv run youtube-autonomous search "python async tutorial"
-uv run youtube-autonomous transcript VIDEO_ID
+uv run youtube-goal-aware search "python async tutorial"
+uv run youtube-goal-aware transcript VIDEO_ID
 
 # Interactive chat
-uv run youtube-autonomous chat
+uv run youtube-goal-aware chat
 
 # Single request - agents chain automatically
-uv run youtube-autonomous chat -r "Find videos about cooking and summarize them"
+uv run youtube-goal-aware chat -r "Find videos about cooking and summarize them"
 
 # Limit transcripts fetched (default: 5)
-uv run youtube-autonomous chat -t 3 -r "Find BBQ videos and summarize them"
+uv run youtube-goal-aware chat -t 3 -r "Find BBQ videos and summarize them"
 ```
 
 ### Example Flow
 
 ```bash
-uv run youtube-autonomous chat -r "Find pork loin videos and summarize cooking temps"
+uv run youtube-goal-aware chat -r "Find pork loin videos and summarize cooking temps"
 ```
 
 The agents chain automatically based on the goal:
@@ -316,7 +316,7 @@ The planner creates an execution DAG upfront with dependency tracking and parall
 |--------|-----------------|---------------|
 | **Control** | LLM decides every step | Dispatcher routes, agents validate |
 | **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
-| **Command** | `youtube-agent` | `youtube-autonomous` |
+| **Command** | `youtube-agent` | `youtube-goal-aware` |
 
 See [docs/AUTONOMOUS_PATTERN.md](docs/AUTONOMOUS_PATTERN.md) for detailed architecture documentation.
 

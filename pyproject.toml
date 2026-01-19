@@ -35,7 +35,7 @@ dev = [
 
 [project.scripts]
 youtube-agent = "youtube_agent_orchestrator.cli.commands:main"
-youtube-autonomous = "youtube_goal_agents.cli.commands:main"
+youtube-goal-aware = "youtube_goal_agents.cli.commands:main"
 youtube-agent-planner = "youtube_agent_planner.cli.commands:main"
 
 [build-system]

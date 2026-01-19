@@ -1,20 +1,23 @@
 # Planning Multi-Agent Workflows: Trading Adaptability for Predictability
 
-*This is Part 3 of a series on building multi-agent systems. [Part 1](part1_architecture.md) covered clean architecture for agents (tools vs services, domain-driven design). [Part 2](part2_autonomous.md) explored autonomous agent coordination (goal-aware reasoning, event-driven handoffs).*
+*This is Part 3 of a series on building multi-agent systems. [Part 1](part1_architecture.md) covered clean architecture for agents (tools vs services, domain-driven design). [Part 2](part2_goal_aware.md) explored goal-aware agent coordination (distributed reasoning, event-driven handoffs).*
 
 ---
 
-In Parts 1 and 2, we explored *who* coordinates multi-agent workflows: a central orchestrator (V1) versus distributed autonomous agents (V2). The autonomous pattern was elegant - agents reasoning about goals and handing off to each other - but it revealed an interesting trade-off.
+The goal-aware pattern from Part 2 felt elegant. Agents reasoning about user goals, handing off to each other, workflows emerging from distributed intelligence rather than central control. It worked beautifully for our pork loin research task.
+
+Then I looked at the LLM call counts.
 
 Every agent in V2 needs to reason about the user's goal. In our benchmark workflow ("search → fetch transcripts → summarize → write"), this adds up:
 
 ```
-V2 Autonomous Pattern (actual benchmark):
-  Dispatcher routing (4 handoffs):    4 LLM calls
-  Agent validation (4 agents):        4 LLM calls
-  Agent execution reasoning:          3 LLM calls
+V2 Goal-Aware Pattern (actual benchmark):
+  Dispatcher routing (5 handoffs):    5 LLM calls
+  Agent validation (5 agents):        5 LLM calls
+  Agent execution reasoning:          6 LLM calls
+  Goal satisfaction checks:           5 LLM calls
 
-Total: 11 LLM calls (zero variance across runs)
+Total: ~21 LLM calls (low variance across runs)
 ```
 
 When every agent needs to think, you need capable models throughout. That gets expensive.
@@ -23,7 +26,7 @@ This led us to explore a different dimension: **What if we front-load the intell
 
 ## In this article, we shall cover:
 
-- Why autonomous agents have high per-step LLM costs
+- Why goal-aware agents have high per-step LLM costs
 - The economic argument for upfront planning
 - How the Planner pattern *enables* strategic model selection
 - Implementing DAG-based execution with dependency tracking
@@ -61,22 +64,23 @@ Same request, different runtime decisions, 2× cost difference.
 - Context accumulates at orchestrator (token costs grow with chain length)
 - **Unpredictable costs** - you don't know until it runs
 
-### V2 Autonomous Costs (actual benchmark: 11 calls, zero variance)
+### V2 Goal-Aware Costs (actual benchmark: ~21 calls, low variance)
 
 ```
-V2 Autonomous Pattern (consistent across all runs):
-  Dispatcher routing (4 handoffs):    4 LLM calls
-  Agent validation (4 agents):        4 LLM calls
-  Agent execution reasoning:          3 LLM calls
+V2 Goal-Aware Pattern (consistent across all runs):
+  Dispatcher routing (5 handoffs):    5 LLM calls
+  Agent validation (5 agents):        5 LLM calls
+  Agent execution reasoning:          6 LLM calls
+  Goal satisfaction checks:           5 LLM calls
 
-Total: 11 LLM calls (zero variance across runs)
+Total: ~21 LLM calls (low variance across runs)
 ```
 
 **Cost characteristics:**
 - Centralized dispatcher routes tasks (1 LLM call per handoff)
 - Agents validate assignments (1 LLM call per agent)
 - Execution uses direct service calls where possible
-- **Predictable costs** - 11 calls for every request
+- **Predictable costs** - ~21 calls for every request
 
 ### The Economic Insight
 
@@ -125,7 +129,18 @@ Total: 3 LLM calls (zero variance across runs)
 - **Transcript**: Just fetch from YouTube's transcript service
 - **File writing**: Just write the formatted output to disk
 
-Only **summarization** requires an LLM to reason about content. Everything else is mechanical execution of the plan. This is why V3 uses 80% fewer LLM calls than V2.
+Only **summarization** requires an LLM to reason about content. Everything else is mechanical execution of the plan. This is why V3 uses 85% fewer LLM calls than V2.
+
+**Where do the 18 eliminated calls go?**
+
+| V2 Overhead | V3 Equivalent |
+|-------------|---------------|
+| Dispatcher routes each handoff (5 LLM calls) | Plan specifies agents upfront (0 calls) |
+| Agents validate assignments (5 LLM calls) | Plan is authoritative (0 calls) |
+| Agent execution reasoning (6 LLM calls) | Steps execute mechanically (0 calls) |
+| Goal satisfaction checks (5 LLM calls) | Plan defines completion (0 calls) |
+
+The planner does more work upfront, but it's *one* call instead of twenty-one distributed calls. V2's dispatcher and validation overhead exists because agents need to dynamically figure out who should do what. V3 answers that question once, in the plan.
 
 ### What You Get
 
@@ -137,26 +152,27 @@ Only **summarization** requires an LLM to reason about content. Everything else 
 **2. Inspectable Plans**
 ```json
 {
-  "goal": "Find asyncio videos, get transcript, summarize",
+  "goal": "Find pork loin videos from Chuds BBQ, get transcript, summarize cooking temps",
   "steps": [
     {
-      "id": "search_asyncio",
+      "id": "search_pork",
       "agent": "search",
-      "model_tier": "cheap",
-      "input": {"query": "Python asyncio tutorial"}
+      "description": "Search for Chuds BBQ pork loin videos",
+      "input": {"query": "Chuds BBQ pork loin kamado"},
+      "depends_on": []
     },
     {
       "id": "fetch_transcript",
       "agent": "transcript",
-      "model_tier": "cheap",
-      "input": {"video_id": "$search_asyncio.results[0].id"},
-      "depends_on": ["search_asyncio"]
+      "description": "Get transcript for top search result",
+      "input": {"video_id": "$search_pork.results[0].video_id"},
+      "depends_on": ["search_pork"]
     },
     {
       "id": "summarize",
       "agent": "summarize",
-      "model_tier": "capable",
-      "input": {"text": "$fetch_transcript.text"},
+      "description": "Extract cooking temperatures and times",
+      "input": {"text": "$fetch_transcript.text", "title": "$fetch_transcript.title"},
       "depends_on": ["fetch_transcript"]
     }
   ]
@@ -182,21 +198,47 @@ Step 2 (depends on both 1a and 1b) → waits for completion
 **1. Adaptability**
 - Can't change course based on findings
 - If search returns no relevant videos, plan still tries to fetch transcripts
-- Mitigation: Re-plan on failure (adds planning cost)
+- **Mitigation**: Validate step outputs before proceeding; re-plan on unexpected results (see Hybrid Approaches below)
 
 **2. Upfront Planning Cost**
 - Every request pays planning cost, even simple ones
 - V1/V2 only use LLM when needed at each step
+- **Mitigation**: Use pattern selection — route simple requests through V1, reserve V3 for complex batch jobs where the planning cost is amortized
 
 **3. Plan Quality Dependency**
 - If planner generates invalid DAG, validation catches it but requires re-planning
 - Planner might hallucinate non-existent agents or capabilities
+- **Mitigation**: Validate plans against agent registry before execution; provide the planner with explicit capability lists
 
 ---
 
 ## Implementation: The DAG Executor
 
+With the conceptual foundation in place, let's look at how the DAG executor actually works. The implementation needs to solve three core problems: representing the workflow as a data structure, executing steps while respecting dependencies, and resolving variable references between steps. Each piece is straightforward on its own—the elegance comes from how they compose.
+
+### What Changes in the Architecture
+
+As with the goal-aware pattern in Part 2, the domain layer stays the same—YouTube search, transcript fetching, summarization. Those services don't change. The Planner pattern adds a thin coordination layer on top:
+
+```
+src/youtube_agent_planner/
+├── cli/                  # Entry points (same pattern as V1/V2)
+│   └── commands.py
+├── agents/
+│   └── planner.py        # NEW: Creates DAGs from natural language
+└── infra/
+    └── dag_executor.py   # NEW: Runs DAGs with dependency tracking
+```
+
+The planner reuses infrastructure from both previous patterns:
+- **From V1 (Orchestrator)**: Chat client setup, agent execution patterns
+- **From V2 (Goal-Aware)**: Session management, agent registry, result types (`PartialResult`, `Task`)
+
+What's genuinely new is minimal: the `PlannerAgent` that generates DAGs, and the `DAGExecutor` that runs them. This is the benefit of the layered architecture we established in Part 1—new coordination patterns don't require rewriting business logic.
+
 ### ExecutionDAG Structure
+
+The DAG needs to capture three things: what each step does, which agent executes it, and what must complete before it can run. Here's the core data structure:
 
 ```python
 @dataclass
@@ -231,6 +273,8 @@ class ExecutionDAG:
 ```
 
 ### The Execution Loop
+
+With the data structure in place, we need a way to run it. The execution loop repeatedly finds steps whose dependencies are satisfied and runs them in parallel:
 
 ```python
 async def execute_dag(dag: ExecutionDAG, agents: dict) -> dict:
@@ -273,7 +317,7 @@ async def execute_dag(dag: ExecutionDAG, agents: dict) -> dict:
 
 ### Variable Resolution
 
-Steps reference outputs from previous steps using `$step_id.field` syntax:
+The execution loop handles *when* steps run, but there's still the question of *how* steps communicate. When the transcript step needs the video ID from the search step, how does that data flow? This is where variable resolution comes in. Steps reference outputs from previous steps using `$step_id.field` syntax:
 
 ```python
 def resolve_variables(input_template: dict, results: dict) -> dict:
@@ -306,21 +350,23 @@ def resolve_variables(input_template: dict, results: dict) -> dict:
 **Example:**
 ```python
 # Step input template
-{"video_id": "$search_asyncio.results[0].id"}
+{"video_id": "$search_pork.results[0].id"}
 
-# Results from search_asyncio step
-results["search_asyncio"] = {
+# Results from search_pork step
+results["search_pork"] = {
     "results": [
-        {"id": "abc123", "title": "Python Asyncio Tutorial"},
-        {"id": "def456", "title": "Advanced Asyncio"}
+        {"id": "fI86yXKlnQA", "title": "Pork Loin on the Kamado Joe"},
+        {"id": "2AF1ysZ8eEA", "title": "Smoked Pork Tenderloin"}
     ]
 }
 
 # Resolves to
-{"video_id": "abc123"}
+{"video_id": "fI86yXKlnQA"}
 ```
 
 ### Model Tier Strategy (Architectural Pattern)
+
+With the execution machinery in place—data structure, execution loop, and variable resolution—we have a working DAG executor. But the explicit plan structure opens up an optimization that's harder to achieve with runtime coordination: strategic model selection per step.
 
 The DAG structure enables a powerful optimization: assign different model tiers based on task complexity. Here's what this *could* look like:
 
@@ -328,9 +374,9 @@ The DAG structure enables a powerful optimization: assign different model tiers 
 def get_model_for_tier(tier: str) -> str:
     """Map model tiers to actual model names."""
     return {
-        "powerful": "gpt-4",           # Planning, complex reasoning
-        "capable": "gpt-4o-mini",      # General execution
-        "cheap": "gpt-3.5-turbo",      # Simple execution tasks
+        "powerful": "claude-opus-4.5",  # Planning, complex reasoning
+        "capable": "gpt-5.2",       # General execution
+        "cheap": "claude-sonnet-4.5",      # Simple execution tasks
     }[tier]
 
 async def execute_step(step: DAGStep, agent: BaseAgent, results: dict) -> Any:
@@ -355,6 +401,108 @@ While our reference implementation doesn't implement model tier selection (all a
 
 ---
 
+## Seeing It in Action
+
+Theory is useful, but let's see the planner actually work. Here's what happens when we run our standard pork loin request through the planner CLI:
+
+```bash
+$ uv run youtube-agent-planner chat -r "I want to cook a pork loin on a Kamado.
+  Find techniques from Chuds BBQ and Fork and Embers.
+  I need temperatures, timing, and grill setup.
+  Save results to pork_loin_guide.md"
+```
+
+```
+YouTube Agent Planner - Interactive Mode
+==================================================
+Creates explicit execution plans before running.
+Type 'exit' or 'quit' to stop.
+
+[Planning...] Creating execution plan ✓ (5 steps)
+[Plan] Goal: Find YouTube-based techniques for cooking a pork loin roast on a Kamado
+  grill/smoker (preferably Fork and Embers and Chuds BBQ), extract key parameters
+  (grill temp, setup, target internal temp, time), and save results to a markdown file.
+  → yt_search_trusted_channels: Search YouTube for pork loin roast Kamado/smoker
+      videos focusing on Fork and Embers and Chuds BBQ channels.
+  → fetch_transcript_video_1: Fetch transcript for the top search result.
+      (after: yt_search_trusted_channels)
+  → fetch_transcript_video_2: Fetch transcript for the second search result.
+      (after: yt_search_trusted_channels)
+  → summarize_and_extract_cook_params: From the transcripts, extract and consolidate
+      cooker temp targets, Kamado setup, target internal temps, and time guidance.
+      (after: fetch_transcript_video_1, fetch_transcript_video_2)
+  → write_markdown_report: Write a markdown file summarizing the extracted cooking
+      techniques with citations and a parameter table.
+      (after: summarize_and_extract_cook_params)
+[Executing...] Running DAG
+```
+
+Notice what's different from V1 and V2:
+
+**1. The plan is visible before execution starts.** You can see exactly what will happen—which agents, in what order, with what dependencies. No surprises.
+
+**2. Parallel steps are explicit.** `fetch_transcript_video_1` and `fetch_transcript_video_2` both depend only on the search step, so they'll run concurrently. The summarization step waits for both.
+
+**3. The LLM reasoning happened once.** That single `[Planning...]` step is the only time the planner LLM runs. Everything after is mechanical execution.
+
+### Execution Flow
+
+With verbose logging enabled (`-v`), we can watch the DAG execute:
+
+```
+[Executor] Starting DAG execution
+[Executor] Ready steps: yt_search_trusted_channels
+[search] Executing: Search YouTube for pork loin roast Kamado/smoker videos...
+[search] ✓ yt_search_trusted_channels completed (1079ms)
+[Executor] Ready steps: fetch_transcript_video_1, fetch_transcript_video_2 (parallel)
+[transcript] Executing: Fetch transcript for the top search result...
+[transcript] Executing: Fetch transcript for the second search result...
+[transcript] ✓ fetch_transcript_video_1 completed (6ms)
+[transcript] ✓ fetch_transcript_video_2 completed (9ms)
+[Executor] Ready steps: summarize_and_extract_cook_params
+[summarize] Executing: From the transcripts, extract and consolidate cooker temp...
+[summarize] ✓ summarize_and_extract_cook_params completed (37266ms)
+[Executor] Ready steps: write_markdown_report
+[writer] Executing: Write a markdown file summarizing the extracted cooking...
+[writer] ✓ write_markdown_report completed (19673ms)
+[Executor] DAG complete: 5/5 steps succeeded
+```
+
+The executor shows each step as it becomes ready, marks parallel steps explicitly, and reports timing. You can see the transcript fetches ran concurrently (both started before either completed).
+
+### What the Output Looks Like
+
+The generated `test_planner_pork_loin.md` (snippet):
+
+```markdown
+# Pork Loin Roast on a Kamado Grill/Smoker — Temps & Timing
+
+## Sources (YouTube)
+- Chuds BBQ (video_id: 2AF1ysZ8eEA)
+- Chuds BBQ (video_id: fI86yXKlnQA)
+
+## Summary
+The video(s) focus on how to make a **lean boneless pork loin roast** come out
+**juicy, tender, and "holiday roast" worthy** using **brining, moderate pit temps
+(~275–300°F), and pulling at ~140–145°F internal**, then finishing with a glaze.
+
+...
+
+## Temps, timing, and doneness guidance
+- **Pit temp:** ~**275–300°F** (both approaches cluster here).
+- **Pull temp:** about **140–145°F internal**.
+- **Cook time:** ~2–4 hours depending on method and size.
+
+## Practical takeaways
+- **Brining is the unlock** for pork loin (wet or dry).
+- **Finish matters:** sear/grill + glaze or mop + butter-rest.
+- **Serve like a holiday roast:** slice thin, consider gravy/sauce.
+```
+
+The same structure we got from V1 and V2—but with predictable cost and an inspectable plan.
+
+---
+
 ## Comparison: Three Patterns
 
 ### Cost Analysis
@@ -362,7 +510,7 @@ While our reference implementation doesn't implement model tier selection (all a
 | Pattern | LLM Calls* | Variance | Why |
 |---------|-----------|----------|-----|
 | **V1 Orchestrator** | 17-34 | **High** | LLM decides workflow at runtime - unpredictable |
-| **V2 Autonomous** | 11 | **None** | Dispatcher routes + agents validate, then execute via direct service calls |
+| **V2 Goal-Aware** | ~21 | **Low** | Dispatcher routes + agents validate, then execute via direct service calls |
 | **V3 Planner+DAG** | ~3 | **None** | Single planning call, then mechanical execution via direct service calls |
 
 *Measured LLM calls for a "search → fetch transcripts → summarize → write" workflow using the reference implementation. Numbers are based on multiple benchmark runs.*
@@ -400,13 +548,14 @@ WriterAgent called with: ...
 
 Run A decided the WriterAgent could synthesize directly from transcripts. Run B added a summarization step. Both produced valid outputs, but with different costs.
 
-**V2 Autonomous breakdown (11 calls, consistent):**
+**V2 Goal-Aware breakdown (~21 calls, low variance):**
 The dispatcher pattern centralizes routing decisions:
-- Dispatcher routing: 4 calls (one per handoff in the chain)
-- Agent validation: 4 calls (each agent confirms assignment)
-- Execution reasoning: 3 calls (goal reasoning where needed)
+- Dispatcher routing: 5 calls (one per handoff in the chain)
+- Agent validation: 5 calls (each agent confirms assignment)
+- Execution reasoning: 6 calls (query extraction, goal reasoning)
+- Goal satisfaction checks: 5 calls (each agent evaluates completion)
 
-In benchmark testing, V2 produced **exactly 11 calls across all runs with zero variance**. Why? The dispatcher routes each task to a specific agent (1 LLM call), the agent validates the assignment (1 LLM call), then executes using direct service calls where possible. Only steps requiring actual reasoning (like summarization) use additional LLM calls during execution.
+In benchmark testing, V2 produced **approximately 21 calls across runs with low variance**. Why? The dispatcher routes each task to a specific agent (1 LLM call), the agent validates the assignment (1 LLM call), then executes using direct service calls where possible. The validation overhead ensures correct routing but adds consistent cost.
 
 **V3 Planner breakdown (~3 calls):**
 - PlannerAgent: 1 call (creates the complete DAG upfront)
@@ -420,71 +569,68 @@ Search, transcript fetching, and file writing are executed mechanically via dire
 | Question | Best Pattern | Rationale |
 |----------|--------------|-----------|
 | Building a conversational interface? | **V1 Orchestrator** | Back-and-forth, context maintenance |
-| Need agents to adapt to findings? | **V2 Autonomous** | Goal-aware reasoning, emergent workflows |
+| Need agents to adapt to findings? | **V2 Goal-Aware** | Goal-aware reasoning, emergent workflows |
 | Running high-volume batch processing? | **V3 Planner+DAG** | Lowest per-request cost |
 | Need to approve workflows before execution? | **V3 Planner+DAG** | Inspectable plans |
 | Compliance/audit requirements? | **V3 Planner+DAG** | Full execution trace |
 | Complex dependencies between steps? | **V3 Planner+DAG** | Explicit DAG prevents mistakes |
 | Debugging complex workflows? | **V3 Planner+DAG** | Compare plan vs execution |
 | Cost is primary constraint? | **V3 Planner+DAG** | Strategic model tier usage |
-| Adaptability is primary constraint? | **V2 Autonomous** | Responds to what it finds |
+| Adaptability is primary constraint? | **V2 Goal-Aware** | Responds to what it finds |
 | Simplicity is primary constraint? | **V1 Orchestrator** | Well-understood pattern |
 
 ### Quick Decision Tree
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│         Which Multi-Agent Pattern Should You Use?           │
-└─────────────────────────────────────────────────────────────┘
+            Which Multi-Agent Pattern Should You Use?
+            ─────────────────────────────────────────
                               │
                               ▼
-              ┌───────────────────────────────┐
-              │ Do you need conversational    │
-              │ back-and-forth with the user? │
-              └───────────────────────────────┘
-                     │              │
-                    YES             NO
-                     │              │
-                     ▼              ▼
-              ┌──────────┐   ┌─────────────────────────────┐
-              │    V1    │   │ Do agents need to adapt     │
-              │Orchestrator│  │ based on what they find?    │
-              └──────────┘   └─────────────────────────────┘
-                                    │              │
-                                   YES             NO
-                                    │              │
-                                    ▼              ▼
-                             ┌──────────┐   ┌─────────────────────┐
-                             │    V2    │   │ Do you need to      │
-                             │Autonomous│   │ inspect/approve the │
-                             └──────────┘   │ plan before running?│
-                                            └─────────────────────┘
-                                                   │         │
-                                                  YES        NO
-                                                   │         │
-                                                   ▼         ▼
-                                            ┌──────────┐  ┌──────────┐
-                                            │    V3    │  │ Start    │
-                                            │ Planner  │  │ with V1  │
-                                            │  + DAG   │  │(simplest)│
-                                            └──────────┘  └──────────┘
+               ┌──────────────────────────────┐
+               │  Need conversational         │
+               │  back-and-forth with user?   │
+               └──────────────────────────────┘
+                      │                │
+                     YES               NO
+                      │                │
+                      ▼                ▼
+              ┌──────────────┐   ┌──────────────────────────┐
+              │      V1      │   │  Do agents need to       │
+              │ Orchestrator │   │  adapt based on findings?│
+              └──────────────┘   └──────────────────────────┘
+                                       │              │
+                                      YES             NO
+                                       │              │
+                                       ▼              ▼
+                               ┌──────────────┐  ┌──────────────────────┐
+                               │      V2      │  │  Need to inspect/    │
+                               │  Goal-Aware  │  │  approve plan first? │
+                               └──────────────┘  └──────────────────────┘
+                                                       │           │
+                                                      YES          NO
+                                                       │           │
+                                                       ▼           ▼
+                                               ┌──────────────┐ ┌──────────────┐
+                                               │      V3      │ │   Start      │
+                                               │ Planner+DAG  │ │   with V1    │
+                                               └──────────────┘ └──────────────┘
 ```
 
 **The short version:**
 - **V1 Orchestrator**: Start here. Simple, conversational, well-understood.
-- **V2 Autonomous**: When workflows should emerge from agent reasoning.
+- **V2 Goal-Aware**: When workflows should emerge from agent reasoning.
 - **V3 Planner+DAG**: When you need predictability, auditability, or cost control.
 
 ### Design Space Summary
 
 We've now explored multi-agent coordination across three dimensions:
 
-**1. Architecture (Part 1):** How to structure clean agent code
+**1. Architecture ([Part 1](part1_architecture.md)):** How to structure clean agent code
 - Tools vs Services separation
 - Domain-Driven Design for agent systems
 - Strategic testing with minimal mocking
 
-**2. Who Coordinates (Part 2):** Central vs distributed
+**2. Who Coordinates ([Part 2](part2_goal_aware.md)):** Central vs distributed
 - V1: Central orchestrator directs everything
 - V2: Distributed agents self-coordinate
 
@@ -515,7 +661,7 @@ Mitigation: Error handling + re-planning (adds cost)
 
 **3. Exploratory Research**
 - "Find interesting videos about X" (undefined criteria)
-- V2 autonomous agents can explore and adapt
+- V2 goal-aware agents can explore and adapt
 - V3 needs concrete plan upfront
 
 ### When Runtime Decisions Win
@@ -599,26 +745,21 @@ def assign_model_tier(step: DAGStep) -> str:
 
 ---
 
-## Implementation Status
+## Key Takeaways
 
-The Planner+DAG pattern is implemented in `youtube_agent_planner/` as a separate package.
+These principles apply regardless of which agent framework you choose:
 
-**Current state:** ✅ Fully functional - all tests pass (31/31), CLI works
+1. **Front-loading intelligence reduces per-request costs** - A single planning call can replace dozens of distributed reasoning calls. When you're processing volume, this adds up.
 
-**What's implemented:**
-- ✅ PlannerAgent creates execution DAGs from natural language
-- ✅ DAGExecutor runs plans with dependency tracking
-- ✅ Parallel execution of independent steps
-- ✅ Variable resolution ($step_id.field syntax)
-- ✅ Plan validation (cycles, missing deps, invalid agents)
-- ✅ Error handling with PartialResult
+2. **Explicit plans enable inspection and approval** - Unlike runtime orchestration, you can see, validate, and modify the workflow before it runs. This matters for compliance, debugging, and user trust.
 
-**What's aspirational** (discussed in this post but not yet implemented):
-- 🟡 Model tier selection (powerful for planning, cheap for execution)
-  - Architecture supports it, just needs configuration
-- 🟡 Re-planning on failure (stubbed in code, needs wiring)
+3. **DAG structures make parallelism natural** - When dependencies are explicit, the executor can automatically parallelize independent steps. No manual coordination needed.
 
-**Note**: The economic argument for the Planner pattern is sound - upfront planning *does* reduce redundant LLM reasoning. However, the specific optimization of using different model tiers per step is an enhancement the pattern enables rather than a current feature. The core value is inspectable plans and predictable execution flow.
+4. **Variable resolution connects steps cleanly** - The `$step_id.field` syntax lets steps reference each other's outputs without coupling. Each step remains independent.
+
+5. **The pattern enables—but doesn't require—model tier optimization** - Once you have an explicit plan, you *can* assign different models per step. The architecture supports it even if you don't use it immediately.
+
+6. **Predictability and adaptability are genuine trade-offs** - The planner can't adapt to surprises mid-execution. If your workflow needs to change course based on findings, goal-aware agents (V2) are the better choice.
 
 ---
 
@@ -626,16 +767,16 @@ The Planner+DAG pattern is implemented in `youtube_agent_planner/` as a separate
 
 The insight that made the Planner pattern compelling wasn't just predictability - it was **economics**.
 
-Autonomous agents (V2) are elegant, but every agent needs to reason about the goal. That means every agent needs a capable model. When you're processing hundreds or thousands of requests, those costs add up.
+Goal-aware agents (V2) are elegant, but every agent needs to reason about the goal. That means every agent needs a capable model. When you're processing hundreds or thousands of requests, those costs add up.
 
-The Planner pattern lets you be strategic: use a powerful model once to create a complete plan, then execute the plan with reduced per-step overhead. For high-volume scenarios, this can significantly reduce costs compared to autonomous agents.
+The Planner pattern lets you be strategic: use a powerful model once to create a complete plan, then execute the plan with reduced per-step overhead. For high-volume scenarios, this can significantly reduce costs compared to goal-aware agents.
 
-But it's a trade-off: you sacrifice the adaptability that makes autonomous agents powerful. The workflow can't change course based on what it finds. If that adaptability matters more than cost, autonomous agents are still the right choice.
+But it's a trade-off: you sacrifice the adaptability that makes goal-aware agents powerful. The workflow can't change course based on what it finds. If that adaptability matters more than cost, goal-aware agents are still the right choice.
 
 **The Three Patterns, Summarized:**
 
 - **V1 Orchestrator:** Simple, conversational, well-understood
-- **V2 Autonomous:** Adaptive, emergent, goal-aware
+- **V2 Goal-Aware:** Adaptive, emergent, distributed reasoning
 - **V3 Planner+DAG:** Predictable, economical, auditable
 
 Choose based on your constraints: cost, adaptability, compliance, simplicity.
@@ -658,9 +799,9 @@ Multi-agent systems aren't mysterious. They're software systems with clear archi
 All patterns described in this series are implemented in the reference codebase:
 
 - **[V1 Orchestrator Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_orchestrator)** - Covered in Part 1
-- **[V2 Autonomous Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_goal_agents)** - Covered in Part 2
+- **[V2 Goal-Aware Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_goal_agents)** - Covered in Part 2
 - **[V3 Planner+DAG Pattern](https://github.com/Chris-hughes10/agents-explore/tree/main/src/youtube_agent_planner)** - This post's focus
 - **[Full Source Code](https://github.com/Chris-hughes10/agents-explore)** - Complete implementation with tests
-- **[Documentation](https://github.com/Chris-hughes10/agents-explore/tree/main/docs)** - Design philosophy, patterns, and guides
 
-The code is meant to be read and learned from, not just used. Star the repo if you find it useful!
+
+The code is meant to be read and learned from, not just used; hopefully you find it useful!

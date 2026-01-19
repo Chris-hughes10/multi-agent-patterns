@@ -39,6 +39,9 @@ class AsyncTaskQueue:
         async with self._lock:
             self._pending[task.id] = task
             self._task_events[task.id] = asyncio.Event()
+            # Clear any previous claim (important for re-routed tasks)
+            if task.id in self._claimed:
+                del self._claimed[task.id]
         await self._queue.put(task)
         # Wake up any agents waiting for tasks
         self._new_task_event.set()

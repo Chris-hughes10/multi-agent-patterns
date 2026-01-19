@@ -1,8 +1,8 @@
-"""End-to-end test script for V2 Autonomous pattern.
+"""End-to-end test script for V2 Goal-Aware pattern.
 
 Uses the shared main module functions for consistency with CLI.
-Run with: uv run python tests/autonomous/e2e_test.py
-Output: output/test_autonomous_*.md
+Run with: uv run python tests/goal_agents/e2e_test.py
+Output: output/test_goal_aware_*.md
 """
 
 import asyncio
@@ -63,24 +63,24 @@ async def main():
 I would like some info on how to do this based on techniques on YouTube.
 Some channels I trust are fork and embers and chuds bbq.
 Ideally, I need to know the temperature, the grill setup, the internal temperature and the time.
-Save the results to test_autonomous_pork_loin.md"""
+Save the results to test_goal_aware_pork_loin.md"""
 
     print("\n" + "=" * 60)
-    print("AUTONOMOUS PATTERN E2E TEST")
+    print("GOAL-AWARE PATTERN E2E TEST")
     print("=" * 60)
     print("USER REQUEST:")
     print(request)
     print("=" * 60 + "\n")
 
     try:
-        response = await process_request(request, timeout=180.0)
+        response = await process_request(request, timeout=300.0)
         print("\n" + "=" * 60)
         print("FINAL RESPONSE:")
         print("=" * 60)
         print(response)
 
         # Verify output
-        output_path = Path("output/test_autonomous_pork_loin.md")
+        output_path = Path("output/test_goal_aware_pork_loin.md")
         print("\n" + "=" * 60)
         print("VERIFICATION:")
         print("=" * 60)
