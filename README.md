@@ -1,13 +1,55 @@
-# YouTube Agent
+# Architecting Multi-Agent Systems
 
-Multi-agent system for YouTube transcript search and summarization using Microsoft Agent Framework.
+A reference implementation exploring three multi-agent coordination patterns, built with the [Microsoft Agent Framework](https://github.com/microsoft/agents).
+
+**This repo accompanies a 3-part blog series:**
+
+1. **[Part 1: Clean Architecture](docs/blog/part1_architecture.md)** — Tools vs services, DDD for agents, the orchestrator pattern
+2. **[Part 2: Goal-Aware Agents](docs/blog/part2_goal_aware.md)** — Distributed coordination, dispatcher pattern, event-driven handoffs
+3. **[Part 3: Planner + DAG](docs/blog/part3_planner.md)** — Upfront planning, predictable costs, parallel execution
+
+## The Problem Domain
+
+YouTube cooking channels contain expert knowledge locked in video format. This project automates: search → transcript → summarize → save. A non-trivial but focused task—complex enough to require multiple agents, simple enough to highlight architectural decisions.
+
+## Three Patterns Explored
+
+| Pattern | Package | Key Idea | Best For |
+|---------|---------|----------|----------|
+| **V1 Orchestrator** | `youtube_agent_orchestrator` | Central LLM coordinates specialists | Conversational interfaces |
+| **V2 Goal-Aware** | `youtube_goal_agents` | Agents reason about goals, hand off to each other | Adaptive workflows |
+| **V3 Planner+DAG** | `youtube_agent_planner` | Single planning call, mechanical execution | Batch processing, cost control |
+
+### Quick Comparison
+
+```
+V1 Orchestrator:  User → Orchestrator → Agent A → Orchestrator → Agent B → User
+V2 Goal-Aware:    User → Agent A → Agent B → Agent C → User
+V3 Planner+DAG:   User → Planner → [parallel execution] → User
+```
+
+| Metric | V1 Orchestrator | V2 Goal-Aware | V3 Planner+DAG |
+|--------|-----------------|---------------|----------------|
+| LLM Calls | 17-34 (high variance) | ~21 (low variance) | ~3 (zero variance) |
+| Adaptability | High | High | Low |
+| Predictability | Low | High | Very High |
+
+## Key Architectural Insights
+
+The blog series explores principles that apply regardless of framework:
+
+- **Tools vs Services** — Tools are thin LLM adapters; services contain business logic. This separation unlocks testability and reuse.
+- **Domain-Driven Design** — Bounded contexts map naturally to agent systems. Group by external system (YouTube, Storage), not by function.
+- **Single Responsibility Agents** — Each agent does one thing. Debugging becomes straightforward: bad summary? Check SummarizeAgent.
+- **Goal-Aware Reasoning** — When agents understand *why* they're asked to do something, they make better decisions about *what* happens next.
 
 ## Features
 
-- **Multi-agent architecture**: Orchestrator coordinates specialized Search, Transcript, and Summarize agents
-- **Conversation memory**: The agent remembers context from previous messages in the session
-- **Smart caching**: Transcripts are automatically cached to avoid re-fetching
-- **Context-aware**: The agent automatically knows what transcripts are stored and uses them before searching YouTube
+- **Three coordination patterns** implemented and benchmarked
+- **Layered architecture** with clear separation of concerns
+- **Parallel execution** via DAG dependency tracking (V3) or fan-out/fan-in (V2)
+- **Conversation memory** for interactive sessions (V1)
+- **Smart caching** to avoid re-fetching transcripts
 
 ## Setup
 
@@ -169,156 +211,49 @@ AZURE_OPENAI_API_KEY=your-key-here
 - **Integration tests**: Require valid Azure OpenAI credentials and network access
 - Run unit tests only: `uv run pytest` (integration tests are skipped by default)
 
-## Architecture
+## Running the Examples
 
-The system uses a **layered architecture** with clear separation of concerns:
+Each pattern has its own CLI entry point. Try the same request across all three to see how they differ:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                         cli/                            │
-│                 Command-line interface                  │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                       agents/                           │
-│              Orchestrator + Specialized Agents          │
-│         (Search, Transcript, Summarize, Writer)         │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                       tools/                            │
-│           LLM-callable functions (thin wrappers)        │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                      services/                          │
-│                Business logic classes                   │
-│          (YouTube API, Storage, Summarizer)             │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                       models/                           │
-│                 Data structures & config                │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Multi-Agent System
-
-The orchestrator coordinates four specialized agents:
-
-| Agent | Responsibility | Calls |
-|-------|---------------|-------|
-| **SearchAgent** | Find videos on YouTube | YouTube search |
-| **TranscriptAgent** | Fetch and cache transcripts | YouTube transcript API |
-| **SummarizeAgent** | Generate summaries | Azure OpenAI |
-| **WriterAgent** | Export to markdown files | File system |
-
-### Key Design Patterns
-
-- **Tools vs Services**: Tools are thin LLM-callable wrappers. Services contain the real business logic.
-- **Domain-Driven**: Services organized by domain (`youtube.py`, `storage.py`, `summarizer.py`)
-- **Context Injection**: `TranscriptContextProvider` tells the orchestrator what's cached before each call
-
-See [DESIGN_PHILOSOPHY.md](docs/DESIGN_PHILOSOPHY.md) for detailed architectural decisions.
-
-## V2: Goal-Aware Multi-Agent System
-
-YouTube Agent V2 (`youtube-goal-aware`) uses **goal-aware agents with dispatcher-based routing** - an LLM router assigns tasks, but agents can validate and reject assignments with reasoning.
-
-### How It Works
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    User Request                         │
-└────────────────────────┬────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Synthesizer                          │
-│         (analyzes request, detects parallelism)         │
-└────────────────────────┬────────────────────────────────┘
-                         ↓
-┌─────────────────────────────────────────────────────────┐
-│              LLM Intent Router (Dispatcher)             │
-│         (routes task to best agent for intent)          │
-└────────────────────────┬────────────────────────────────┘
-                         │
-       ┌─────────────────┼─────────────────┐
-       ↓                 ↓                 ↓
-  ┌─────────┐      ┌───────────┐     ┌─────────┐
-  │ Search  │      │Transcript │     │Summarize│ ...
-  └────┬────┘      └─────┬─────┘     └────┬────┘
-       └─────────────────┴────────────────┘
-                         ↓
-              validate → accept/reject → execute
-                         ↓
-              ┌──────────┴──────────┐
-              │                     │
-           complete            handoff
-              ↓                     ↓
-           DONE              Post new task
-                             (re-route if rejected)
-```
-
-**Key features:**
-- **Dispatcher + confirmation**: LLM routes tasks, agents validate before executing
-- **Agent rejection with re-routing**: Mis-routed tasks get re-assigned with context
-- **Goal-aware handoffs**: Agents reason about user's goal, hand off to continue chain
-- **State accumulation**: Context builds up as the chain progresses
-
-### Quick Start
+### V1 Orchestrator — Conversational coordination
 
 ```bash
-# List registered agents
-uv run youtube-goal-aware agents
+uv run youtube-agent chat
+# Or single request:
+uv run youtube-agent chat "Find videos about pork loin and summarize cooking temps"
+```
 
-# Simple commands
-uv run youtube-goal-aware search "python async tutorial"
-uv run youtube-goal-aware transcript VIDEO_ID
+The orchestrator decides what to do at each step, maintaining conversation context.
 
-# Interactive chat
+### V2 Goal-Aware — Distributed agent coordination
+
+```bash
 uv run youtube-goal-aware chat
-
-# Single request - agents chain automatically
-uv run youtube-goal-aware chat -r "Find videos about cooking and summarize them"
-
-# Limit transcripts fetched (default: 5)
-uv run youtube-goal-aware chat -t 3 -r "Find BBQ videos and summarize them"
+# Or single request:
+uv run youtube-goal-aware chat -r "Find videos about pork loin and summarize cooking temps"
 ```
 
-### Example Flow
+Agents reason about the goal and hand off to each other. Use `-v` for verbose output showing agent decisions.
+
+### V3 Planner+DAG — Upfront planning
 
 ```bash
-uv run youtube-goal-aware chat -r "Find pork loin videos and summarize cooking temps"
+uv run youtube-agent-planner chat
+# Or single request:
+uv run youtube-agent-planner chat -r "Find videos about pork loin and summarize cooking temps"
 ```
 
-The agents chain automatically based on the goal:
-1. **SearchAgent** finds videos → hands off to TranscriptAgent
-2. **TranscriptAgent** fetches transcripts → hands off to SummarizeAgent
-3. **SummarizeAgent** generates summary → completes (or hands off to WriterAgent if "save" is mentioned)
+Creates an explicit execution plan before running. You can see the full DAG before execution starts.
 
-### DAG Planner (Separate Package)
+### Utility Commands
 
-For complex multi-step workflows with explicit planning and parallel execution, use the separate `youtube-agent-planner`:
+All patterns share these utilities:
 
 ```bash
-uv run youtube-agent-planner chat -r "Find videos about grilling and summarize them"
+uv run youtube-agent search "python async tutorial"    # Search YouTube
+uv run youtube-agent transcript VIDEO_ID               # Fetch transcript
+uv run youtube-agent list                              # Show cached transcripts
 ```
-
-The planner creates an execution DAG upfront with dependency tracking and parallel execution. See [docs/blog/part3_planner.md](docs/blog/part3_planner.md) for details.
-
-### V1 vs V2
-
-| Aspect | V1 Orchestrator | V2 Goal-Aware |
-|--------|-----------------|---------------|
-| **Control** | LLM decides every step | Dispatcher routes, agents validate |
-| **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
-| **Command** | `youtube-agent` | `youtube-goal-aware` |
-
-See [docs/blog/part2_goal_aware.md](docs/blog/part2_goal_aware.md) for detailed architecture documentation.
 
 ---
 
