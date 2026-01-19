@@ -308,7 +308,7 @@ For complex multi-step workflows with explicit planning and parallel execution, 
 uv run youtube-agent-planner chat -r "Find videos about grilling and summarize them"
 ```
 
-The planner creates an execution DAG upfront with dependency tracking and parallel execution. See [docs/PLANNER_DAG_PATTERN.md](docs/PLANNER_DAG_PATTERN.md) for details.
+The planner creates an execution DAG upfront with dependency tracking and parallel execution. See [docs/blog/part3_planner.md](docs/blog/part3_planner.md) for details.
 
 ### V1 vs V2
 
@@ -318,7 +318,7 @@ The planner creates an execution DAG upfront with dependency tracking and parall
 | **Best for** | Conversational, reasoning-heavy | Goal-driven batch processing |
 | **Command** | `youtube-agent` | `youtube-goal-aware` |
 
-See [docs/AUTONOMOUS_PATTERN.md](docs/AUTONOMOUS_PATTERN.md) for detailed architecture documentation.
+See [docs/blog/part2_goal_aware.md](docs/blog/part2_goal_aware.md) for detailed architecture documentation.
 
 ---
 

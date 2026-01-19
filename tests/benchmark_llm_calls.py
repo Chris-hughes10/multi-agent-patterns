@@ -1,6 +1,6 @@
 """Benchmark script for measuring LLM calls across different agent patterns.
 
-This script runs each agent pattern (V1 Orchestrator, V2 Autonomous, V3 Planner)
+This script runs each agent pattern (V1 Orchestrator, V2 Goal-Aware, V3 Planner)
 multiple times and counts the LLM calls made during each run.
 
 Key features:
@@ -201,8 +201,8 @@ async def run_orchestrator_pattern(request: str) -> str:
     return await process_request(request)
 
 
-async def run_autonomous_pattern(request: str, timeout: float = 180.0) -> str:
-    """Run the V2 Autonomous pattern."""
+async def run_goal_aware_pattern(request: str, timeout: float = 180.0) -> str:
+    """Run the V2 Goal-Aware pattern."""
     from youtube_goal_agents.cli.main import process_request
     return await process_request(request, timeout=timeout)
 
@@ -326,7 +326,7 @@ async def run_benchmark(
 
     pattern_runners = {
         "v1": ("V1 Orchestrator", run_orchestrator_pattern),
-        "v2": ("V2 Autonomous", run_autonomous_pattern),
+        "v2": ("V2 Goal-Aware", run_goal_aware_pattern),
         "v3": ("V3 Planner", run_planner_pattern),
     }
 
