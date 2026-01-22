@@ -4,9 +4,9 @@ A reference implementation exploring three multi-agent coordination patterns, bu
 
 **This repo accompanies a 3-part blog series:**
 
-1. **[Part 1: Clean Architecture](docs/blog/part1_architecture.md)** — Tools vs services, DDD for agents, the orchestrator pattern
-2. **[Part 2: Goal-Aware Agents](docs/blog/part2_goal_aware.md)** — Distributed coordination, dispatcher pattern, event-driven handoffs
-3. **[Part 3: Planner + DAG](docs/blog/part3_planner.md)** — Upfront planning, predictable costs, parallel execution
+1. **[Part 1: Clean Architecture](https://chris-hughes10.github.io/posts/multi-agent-part1/)** — Tools vs services, DDD for agents, the orchestrator pattern
+2. **[Part 2: Goal-Aware Agents](https://chris-hughes10.github.io/posts/multi-agent-part2/)** — Distributed coordination, dispatcher pattern, event-driven handoffs
+3. **[Part 3: Planner + DAG](https://chris-hughes10.github.io/posts/multi-agent-part3/)** — Upfront planning, predictable costs, parallel execution
 
 ## The Problem Domain
 
