@@ -75,21 +75,39 @@ Respond with JSON only:
 
 ERROR_RESPONSE_PROMPT = """The user asked: "{user_request}"
 
-Unfortunately, there was an issue during processing:
+The agent workflow encountered an error:
 Error: {error}
 
-Partial data collected: {partial_data}
+Partial data collected (if any): {partial_data}
 
-Please explain what happened to the user in a helpful way and suggest alternatives."""
+CRITICAL INSTRUCTIONS:
+1. Be HONEST about what failed - do not claim capabilities you don't have
+2. Report the ACTUAL error message above
+3. If partial data was collected, present what DID work
+4. DO NOT hallucinate fake results or claim you "can't search YouTube" if the error is something else
+5. Suggest specific alternatives based on the actual error
+
+Format: Clearly explain what went wrong and what partial results (if any) are available."""
 
 
 SUCCESS_RESPONSE_PROMPT = """The user asked: "{user_request}"
 
-Here are the results from the specialized agents:
+Here are the ACTUAL results from the specialized agents:
 {result}
 
-Please present these results to the user in a clear, helpful format.
-Summarize key findings and suggest any relevant follow-up actions."""
+CRITICAL INSTRUCTIONS:
+1. Present ONLY the information that appears in the results above
+2. DO NOT claim you "can't" do something - the agents ALREADY DID the work
+3. DO NOT hallucinate or make up information not in the results
+4. If results contain summaries, present those summaries
+5. If results contain file paths, tell the user where the file was saved
+6. If results contain video IDs or titles, include them
+
+Format your response clearly, highlighting:
+- What was accomplished
+- Key findings from the results
+- Any files created (with paths)
+- Suggested follow-up actions if relevant"""
 
 
 class SynthesizerAgent:

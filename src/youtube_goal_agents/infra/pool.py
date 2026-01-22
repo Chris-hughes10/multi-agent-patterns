@@ -799,24 +799,59 @@ class DispatcherPool:
             join_intent[:50],
         )
 
-        # Wait for all parallel tasks to complete
+        # Wait for all parallel tasks to complete (or timeout)
+        timed_out = False
         for task_id in task_ids:
             remaining_timeout = None
             if timeout:
                 elapsed = time.time() - start_time
                 remaining_timeout = max(0, timeout - elapsed)
                 if remaining_timeout <= 0:
-                    return TaskResult(success=False, error="Fan-out timed out")
+                    timed_out = True
+                    break
 
-            await self._registry.wait_for_task(task_id, timeout=remaining_timeout)
+            completed = await self._registry.wait_for_task(task_id, timeout=remaining_timeout)
+            if completed is None:
+                # This specific task timed out
+                timed_out = True
+                break
+
+        # If we timed out, collect partial results and post join task
+        group_to_join: TaskGroup | None = None
+        if timed_out:
+            async with self._groups_lock:
+                if group_id in self._task_groups:
+                    grp = self._task_groups[group_id]
+                    # Mark any incomplete tasks as timed out
+                    for tid in task_ids:
+                        if tid not in grp.results and not any(tid[:8] in e for e in grp.errors):
+                            grp.errors.append(f"Task {tid[:8]}: Timed out")
+
+                    logger.info(
+                        "Fan-out timed out, proceeding with partial results: %d/%d succeeded",
+                        len(grp.results),
+                        len(task_ids),
+                    )
+
+                    # If we have any results, save reference to post join task
+                    if grp.results:
+                        group_to_join = grp
+                else:
+                    return TaskResult(success=False, error="Fan-out timed out and group not found")
+
+            # Post join task with partial results (outside lock)
+            if group_to_join is not None:
+                await self._post_join_task(group_to_join)
 
         # Find and follow the join task
         remaining_timeout = None
         if timeout:
             elapsed = time.time() - start_time
             remaining_timeout = max(0, timeout - elapsed)
+            # Give some time for join task processing even if we're near timeout
+            remaining_timeout = max(remaining_timeout, 30.0)
 
-        # Look for the join task (posted by _check_group_completion)
+        # Look for the join task (posted by _check_group_completion or above)
         join_task = await self._find_join_task(group_id, remaining_timeout)
         if not join_task:
             # Group might have completed without join (all errors?)

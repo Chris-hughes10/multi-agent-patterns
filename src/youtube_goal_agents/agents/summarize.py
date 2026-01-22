@@ -66,11 +66,18 @@ WHAT I DID: Created {summary_count} synthesized summary from YouTube video trans
 
 QUESTION: Is the user's goal satisfied with this summary, or do they need the content saved to a file?
 
-Consider:
-- If they wanted information, analysis, or answers → goal is SATISFIED (I provided a summary)
-- If they explicitly asked to save, export, write to file, or create a document → need to WRITE TO FILE
+FILE OUTPUT TRIGGERS - if the goal contains ANY of these phrases, answer SATISFIED: no:
+- "create a document"
+- "write to file"
+- "save to"
+- "export to"
+- "create a summary document"
+- "write out"
+- "save notes"
+- "markdown file"
+- ".md"
 
-IMPORTANT: Summaries are usually the FINAL step. Only say "not satisfied" if the user explicitly asked for file output.
+Otherwise, if the goal just asks for information/answers/summary without file output → SATISFIED: yes
 
 Respond in this exact format:
 SATISFIED: yes or no
@@ -78,9 +85,11 @@ NEXT_STEP: (only if no) write to file
 
 Examples:
 Goal: "summarize this video" → SATISFIED: yes
+Goal: "create a document summarizing the videos" → SATISFIED: no, NEXT_STEP: write to file
 Goal: "save notes to research.md" → SATISFIED: no, NEXT_STEP: write to file
 Goal: "find videos and summarize" → SATISFIED: yes
-Goal: "get info and export to markdown" → SATISFIED: no, NEXT_STEP: write to file"""
+Goal: "get info and export to markdown" → SATISFIED: no, NEXT_STEP: write to file
+Goal: "Can you create a document summarising the key points" → SATISFIED: no, NEXT_STEP: write to file"""
 
 
 class SummarizeAgent(BaseAgent):
