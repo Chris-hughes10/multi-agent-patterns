@@ -55,20 +55,25 @@ AVAILABLE AGENTS:
 USER REQUEST: "{user_request}"
 
 INSTRUCTIONS:
-1. Identify if the request asks for MULTIPLE INDEPENDENT tasks of the SAME TYPE
-   - Example: "Search channel A AND channel B" = 2 parallel searches
-   - Example: "Get transcripts for video X and video Y" = 2 parallel transcript fetches
-2. Tasks are parallel if they:
-   - Can run independently (don't depend on each other's results)
-   - Are the same type of operation (both searches, both transcripts, etc.)
-3. Sequential tasks are NOT parallel:
-   - "Search, then get transcripts, then summarize" = sequential (each depends on previous)
+1. ONLY the FIRST step can be parallelized. Later steps (transcripts, summaries, file writing) depend on earlier results.
+2. Parallel tasks must be:
+   - The SAME type of operation (e.g., all searches)
+   - Completely independent (no task needs another's output)
+   - The FIRST step in the workflow
+3. CRITICAL: "Find 2 videos, get transcripts, summarize" means:
+   - Parallel: 2 search tasks (finding the videos)
+   - Join: "fetch transcripts and summarize" (sequential AFTER searches complete)
+   - DO NOT parallelize transcript/summarize - they need search results first!
+4. Common patterns:
+   - "Find X and Y" → 2 parallel searches, join handles the rest
+   - "Get transcripts for video A and B" (IDs given) → 2 parallel transcript fetches
+   - "Search, transcript, summarize" → NO parallelism (sequential chain)
 
 Respond with JSON only:
 {{
     "has_parallelism": true/false,
-    "parallel_intents": ["task 1 description", "task 2 description"] or null,
-    "join_intent": "what to do after parallel tasks complete" or null,
+    "parallel_intents": ["search task 1", "search task 2"] or null,
+    "join_intent": "what to do after parallel tasks complete (e.g., fetch transcripts and summarize)" or null,
     "reasoning": "brief explanation"
 }}"""
 

@@ -52,22 +52,25 @@ QUESTION: Is the user's goal satisfied by just having these raw transcripts, or 
 
 Consider:
 - If they ONLY want the transcript text itself → goal is SATISFIED
-- If they want specific information extracted (temperatures, steps, times, etc.) → need SUMMARIZATION first
-- If they want key points, summaries, or answers to questions → need SUMMARIZATION first
-- If they want to save/export AND need analysis → SUMMARIZE FIRST, then save (summarization must come before saving!)
+- If they want specific information extracted, summaries, key points, or analysis → need SUMMARIZATION
+- If they want to save/export AND need analysis → SUMMARIZE FIRST
 
-IMPORTANT: If the goal mentions both "summarize" AND "save to file", the next step is SUMMARIZATION (the save comes after).
+CRITICAL RULES:
+1. My job (transcript fetching) is COMPLETE. I have the transcripts.
+2. Do NOT suggest searching, finding, or identifying videos - that's already done!
+3. The ONLY valid next steps are: summarize, analyze, extract info, or write to file
+4. If user asked for "2 videos" but I got more, that's fine - summarization will focus on relevant ones
 
 Respond in this exact format:
 SATISFIED: yes or no
-NEXT_STEP: (only if not satisfied) describe what needs to happen next - focus on ANALYSIS/SUMMARIZATION, not file saving
+NEXT_STEP: (only if not satisfied) what analysis/summarization is needed
 
 Example responses:
 SATISFIED: yes
 NEXT_STEP: none
 
 SATISFIED: no
-NEXT_STEP: Analyze these transcripts to extract the cooking temperatures, grill setup, and timing information the user asked for"""
+NEXT_STEP: Summarize these transcripts to extract the key points about reading books and understanding papers"""
 
 
 VIDEO_SELECTION_PROMPT = """Select the {max_count} most relevant videos for this user's request.
@@ -276,7 +279,10 @@ class TranscriptAgent(BaseAgent):
             }
 
             # Use LLM to reason about whether the goal is satisfied
-            reasoning = await self._reason_about_goal(goal, transcript_data)
+            # Use original_request (not current task intent) to avoid infinite loops
+            # when join tasks have narrow intents like "fetch transcripts for 2 videos"
+            original_request = state.get("original_request", goal)
+            reasoning = await self._reason_about_goal(original_request, transcript_data)
 
             if reasoning["satisfied"]:
                 return HandoffResult.complete(transcript_data)
