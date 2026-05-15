@@ -4,8 +4,10 @@ import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from agent_framework import Message
+
 if TYPE_CHECKING:
-    from agent_framework.azure import AzureOpenAIChatClient
+    from agent_framework.openai import OpenAIChatClient
 
     from youtube_goal_agents.infra.registry import AgentRegistry
 
@@ -105,7 +107,7 @@ class SummarizeAgent(BaseAgent):
         self,
         registry: "AgentRegistry",
         summarizer: TranscriptSummarizer | None = None,
-        client: "AzureOpenAIChatClient | None" = None,
+        client: "OpenAIChatClient | None" = None,
     ) -> None:
         """Initialize with registry and optional dependencies.
 
@@ -314,7 +316,7 @@ class SummarizeAgent(BaseAgent):
 
         try:
             client = self._client
-            response = await client.get_response(prompt)
+            response = await client.get_response([Message(role="user", contents=[prompt])])
             text = response.text.strip()
 
             text_lower = text.lower()

@@ -1,8 +1,8 @@
 """Transcript Agent - manages YouTube video transcripts."""
 
-from agent_framework import ChatAgent
+from agent_framework import Agent
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_agent_orchestrator.tools.youtube import (
     fetch_video_transcript,
     list_stored_transcripts,
@@ -26,15 +26,13 @@ When fetching:
 You only manage transcripts - you do not summarize them. The Summarize Agent handles that."""
 
 
-def create_transcript_agent() -> ChatAgent:
+def create_transcript_agent() -> Agent:
     """Create a Transcript Agent instance.
 
-    :return: Configured ChatAgent for transcript management
+    :return: Configured Agent for transcript management
     """
-    client = get_chat_client()
-
-    return ChatAgent(
-        chat_client=client,
+    return Agent(
+        client=get_chat_client(),
         name="TranscriptAgent",
         instructions=TRANSCRIPT_AGENT_INSTRUCTIONS,
         tools=[
@@ -43,4 +41,5 @@ def create_transcript_agent() -> ChatAgent:
             lookup_stored_transcript,
             list_stored_transcripts,
         ],
+        default_options=get_default_options(),
     )

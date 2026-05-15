@@ -236,7 +236,7 @@ class OperationTimeout:
 
     Example usage in an agent:
         result = await self._call_with_timeout(
-            self._client.get_response(prompt),
+            self._client.get_response([Message(role="user", contents=[prompt])]),
             timeout=30.0,
             operation="goal_reasoning",
             context={"goal": goal, "partial_analysis": partial}

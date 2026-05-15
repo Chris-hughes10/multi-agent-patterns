@@ -680,7 +680,7 @@ class TestPlannerAgent:
         # Mock the chat client
         mock_client = MagicMock()
 
-        with patch("youtube_agent_planner.agents.planner.ChatAgent") as MockChatAgent:
+        with patch("youtube_agent_planner.agents.planner.Agent") as MockChatAgent:
             mock_agent = MagicMock()
             mock_agent.run = AsyncMock(
                 return_value=MagicMock(
@@ -794,7 +794,7 @@ This plan will work well."""
 
         mock_client = MagicMock()
 
-        with patch("youtube_agent_planner.agents.planner.ChatAgent") as MockChatAgent:
+        with patch("youtube_agent_planner.agents.planner.Agent") as MockChatAgent:
             mock_agent = MagicMock()
             mock_agent.run = AsyncMock(
                 return_value=MagicMock(
