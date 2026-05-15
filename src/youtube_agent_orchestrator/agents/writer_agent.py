@@ -2,9 +2,9 @@
 
 import logging
 
-from agent_framework import ChatAgent
+from agent_framework import Agent
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_agent_orchestrator.tools.writer import write_markdown_file, write_timestamped_markdown
 
 logger = logging.getLogger("youtube_agent.writer_agent")
@@ -27,19 +27,18 @@ IMPORTANT: You write files exactly as requested. You do NOT generate new content
 the Orchestrator or other agents provide the content to write."""
 
 
-def create_writer_agent() -> ChatAgent:
+def create_writer_agent() -> Agent:
     """Create a Writer Agent instance.
 
-    :return: Configured ChatAgent for writing markdown files
+    :return: Configured Agent for writing markdown files
     """
-    client = get_chat_client()
-
-    return ChatAgent(
-        chat_client=client,
+    return Agent(
+        client=get_chat_client(),
         name="WriterAgent",
         instructions=WRITER_AGENT_INSTRUCTIONS,
         tools=[
             write_markdown_file,
             write_timestamped_markdown,
         ],
+        default_options=get_default_options(),
     )

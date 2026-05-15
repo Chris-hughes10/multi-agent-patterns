@@ -9,10 +9,10 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from agent_framework import ChatAgent
-from agent_framework.azure import AzureOpenAIChatClient
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatClient
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_agent_planner.infra.dag_executor import DAGStep, ExecutionDAG
 
 if TYPE_CHECKING:
@@ -174,7 +174,7 @@ class PlannerAgent:
     def __init__(
         self,
         registry: "AgentRegistry",
-        client: AzureOpenAIChatClient | None = None,
+        client: OpenAIChatClient | None = None,
     ) -> None:
         """Initialize the planner.
 
@@ -183,15 +183,15 @@ class PlannerAgent:
         """
         self._registry = registry
         self._client = client or get_chat_client()
-        self._chat_agent: ChatAgent | None = None
+        self._chat_agent: Agent | None = None
 
     @property
     def name(self) -> str:
         """Return agent name."""
         return "planner"
 
-    def _get_chat_agent(self) -> ChatAgent:
-        """Get or create the ChatAgent for planning."""
+    def _get_chat_agent(self) -> Agent:
+        """Get or create the Agent for planning."""
         if self._chat_agent is None:
             agent_catalog = _build_agent_catalog(self._registry)
             agent_names = ", ".join(f'"{a.name}"' for a in self._registry.all_agents())
@@ -200,11 +200,12 @@ class PlannerAgent:
                 agent_names=agent_names,
             )
 
-            self._chat_agent = ChatAgent(
-                chat_client=self._client,
+            self._chat_agent = Agent(
+                client=self._client,
                 name=self.name,
                 instructions=instructions,
                 tools=[],
+                default_options=get_default_options(),
             )
         return self._chat_agent
 
@@ -255,11 +256,12 @@ class PlannerAgent:
         )
 
         # Create a fresh agent for re-planning
-        replan_agent = ChatAgent(
-            chat_client=self._client,
+        replan_agent = Agent(
+            client=self._client,
             name=f"{self.name}_replan",
             instructions=instructions,
             tools=[],
+            default_options=get_default_options(),
         )
 
         prompt = REPLAN_USER_PROMPT.format(original_goal=original_goal)

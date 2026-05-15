@@ -4,11 +4,9 @@ Provides dynamic context about stored transcripts to help the agent
 make better decisions about when to search vs. use cached data.
 """
 
-from collections.abc import MutableSequence, Sequence
 from typing import Any
 
-from agent_framework._memory import Context, ContextProvider
-from agent_framework._types import ChatMessage
+from agent_framework import ContextProvider, SessionContext
 
 from youtube_agent_orchestrator.services.storage import TranscriptStorage
 
@@ -17,37 +15,36 @@ class TranscriptContextProvider(ContextProvider):
     """Provides context about stored transcripts to the orchestrator.
 
     Before each agent invocation, this provider checks what transcripts
-    are stored and injects that information as additional context.
+    are stored and injects that information as additional instructions.
     This helps the agent decide whether to search YouTube or use
     existing cached transcripts.
     """
 
-    def __init__(self) -> None:
-        """Initialize the context provider."""
+    DEFAULT_SOURCE_ID = "transcript_context"
+
+    def __init__(self, source_id: str | None = None) -> None:
+        super().__init__(source_id or self.DEFAULT_SOURCE_ID)
         self._storage = TranscriptStorage()
         self._discussed_videos: set[str] = set()
 
-    async def invoking(
+    async def before_run(
         self,
-        messages: ChatMessage | MutableSequence[ChatMessage],  # noqa: ARG002
-        **kwargs: Any,  # noqa: ARG002
-    ) -> Context:
-        """Called before the agent invokes the LLM.
-
-        Provides context about available stored transcripts.
-
-        :param messages: The messages being sent to the agent
-        :return: Additional context to inject
-        """
-        # Get list of stored transcripts
+        *,
+        agent: Any,  # noqa: ARG002
+        session: Any,  # noqa: ARG002
+        context: SessionContext,
+        state: dict[str, Any],  # noqa: ARG002
+    ) -> None:
+        """Inject instructions about available stored transcripts."""
         video_ids = self._storage.list_videos()
 
         if not video_ids:
-            return Context(
-                instructions="\n\n## Available Transcripts\nNo transcripts are currently stored."
+            context.extend_instructions(
+                self.source_id,
+                "\n\n## Available Transcripts\nNo transcripts are currently stored.",
             )
+            return
 
-        # Build a summary of stored transcripts
         transcript_info = []
         for vid in video_ids:
             stored = self._storage.load(vid)
@@ -61,7 +58,6 @@ class TranscriptContextProvider(ContextProvider):
 
         stored_list = "\n".join(transcript_info)
 
-        # Track which videos we've discussed recently
         recently_discussed = ""
         if self._discussed_videos:
             recently_discussed = (
@@ -78,32 +74,24 @@ The following transcripts are already cached and available for immediate use:
 IMPORTANT: If the user asks about content from these videos or channels, use the TranscriptAgent
 to look them up instead of searching YouTube again. Only search if you need new videos."""
 
-        return Context(instructions=instructions)
+        context.extend_instructions(self.source_id, instructions)
 
-    async def invoked(
+    async def after_run(
         self,
-        request_messages: ChatMessage | Sequence[ChatMessage],
-        response_messages: ChatMessage | Sequence[ChatMessage] | None = None,
-        invoke_exception: Exception | None = None,
-        **kwargs: Any,
+        *,
+        agent: Any,  # noqa: ARG002
+        session: Any,  # noqa: ARG002
+        context: SessionContext,  # noqa: ARG002
+        state: dict[str, Any],  # noqa: ARG002
     ) -> None:
-        """Called after the agent receives a response.
+        """Hook for post-invocation processing.
 
-        Tracks which videos were discussed in this conversation.
-
-        :param request_messages: Messages sent to the agent
-        :param response_messages: Messages received from the agent
-        :param invoke_exception: Any exception that occurred
+        Currently a no-op — we rely on storage to track what's been fetched
+        rather than parsing the response.
         """
-        # Could parse response_messages to track discussed video IDs
-        # For now, we rely on the storage to track what's been fetched
-        pass
 
     def mark_video_discussed(self, video_id: str) -> None:
-        """Mark a video as having been discussed in this conversation.
-
-        :param video_id: The video ID that was discussed
-        """
+        """Mark a video as having been discussed in this conversation."""
         self._discussed_videos.add(video_id)
 
     def reset(self) -> None:

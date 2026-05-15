@@ -5,10 +5,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from agent_framework import ChatAgent
-from agent_framework.azure import AzureOpenAIChatClient
+from agent_framework import Agent, Message
+from agent_framework.openai import OpenAIChatClient
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_goal_agents.models.task import (
     MaxDepthExceededError,
     Task,
@@ -39,11 +39,11 @@ class BaseAgent(ABC):
     Subclasses must implement:
     - name: Unique agent identifier
     - capabilities: List of capability strings
-    - _get_instructions: System prompt for the underlying ChatAgent
-    - _get_tools: List of callable tools for the ChatAgent
+    - _get_instructions: System prompt for the underlying Agent
+    - _get_tools: List of callable tools for the Agent
 
     :param registry: AgentRegistry for task submission and agent discovery
-    :param client: Optional AzureOpenAIChatClient (uses default if not provided)
+    :param client: Optional OpenAIChatClient (uses default if not provided)
     """
 
     # Default timeout for LLM operations (can be overridden per-agent or per-call)
@@ -52,7 +52,7 @@ class BaseAgent(ABC):
     def __init__(
         self,
         registry: "AgentRegistry",
-        client: AzureOpenAIChatClient | None = None,
+        client: OpenAIChatClient | None = None,
         llm_timeout: float | None = None,
     ) -> None:
         """Initialize the agent with registry and optional client.
@@ -63,7 +63,7 @@ class BaseAgent(ABC):
         """
         self._registry = registry
         self._client = client or get_chat_client()
-        self._chat_agent: ChatAgent | None = None
+        self._chat_agent: Agent | None = None
         self._llm_timeout = llm_timeout or self.DEFAULT_LLM_TIMEOUT
 
     @property
@@ -100,7 +100,7 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def _get_instructions(self) -> str:
-        """Get the system instructions for the underlying ChatAgent.
+        """Get the system instructions for the underlying Agent.
 
         :return: System prompt string
         """
@@ -177,7 +177,7 @@ REASON: Brief explanation (1 sentence)"""
 
         try:
             response = await self._call_with_timeout_or_raise(
-                self._client.get_response(prompt),
+                self._client.get_response([Message(role="user", contents=[prompt])]),
                 operation="validate_assignment",
                 timeout=10.0,  # Quick validation
             )
@@ -203,19 +203,20 @@ REASON: Brief explanation (1 sentence)"""
             # On timeout, accept to avoid blocking the workflow
             return ValidationResult.accept(confidence=0.5)
 
-    def _get_chat_agent(self) -> ChatAgent:
-        """Get or create the underlying ChatAgent.
+    def _get_chat_agent(self) -> Agent:
+        """Get or create the underlying Agent.
 
-        Lazily initializes the ChatAgent on first use.
+        Lazily initializes the Agent on first use.
 
-        :return: Configured ChatAgent instance
+        :return: Configured Agent instance
         """
         if self._chat_agent is None:
-            self._chat_agent = ChatAgent(
-                chat_client=self._client,
+            self._chat_agent = Agent(
+                client=self._client,
                 name=self.name,
                 instructions=self._get_instructions(),
                 tools=self._get_tools(),
+                default_options=get_default_options(),
             )
         return self._chat_agent
 
@@ -235,7 +236,7 @@ REASON: Brief explanation (1 sentence)"""
 
         Example:
             result = await self._call_with_timeout(
-                self._client.get_response(prompt),
+                self._client.get_response([Message(role="user", contents=[prompt])]),
                 operation="goal_reasoning",
                 context={"goal": goal},
                 suggested_fallback="Use keyword matching instead"

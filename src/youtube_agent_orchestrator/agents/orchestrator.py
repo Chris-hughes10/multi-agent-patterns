@@ -4,15 +4,14 @@ import logging
 from collections.abc import Callable
 from typing import Annotated
 
-from agent_framework import ChatAgent
-from agent_framework._threads import AgentThread
+from agent_framework import Agent, AgentSession
 from pydantic import Field
 
 from youtube_agent_orchestrator.agents.search_agent import create_search_agent
 from youtube_agent_orchestrator.agents.summarize_agent import create_summarize_agent
 from youtube_agent_orchestrator.agents.transcript_agent import create_transcript_agent
 from youtube_agent_orchestrator.agents.writer_agent import create_writer_agent
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_agent_orchestrator.infra.context import TranscriptContextProvider
 
 logger = logging.getLogger("youtube_agent.orchestrator")
@@ -79,27 +78,27 @@ class OrchestratorAgent:
     This class manages the lifecycle of sub-agents and provides
     tool wrappers that the orchestrator can use to delegate work.
 
-    The orchestrator maintains conversation memory via an AgentThread,
+    The orchestrator maintains conversation memory via an AgentSession,
     and uses a TranscriptContextProvider to inject information about
     stored transcripts before each agent call.
     """
 
     def __init__(self) -> None:
         """Initialize the orchestrator with sub-agents."""
-        self._agents: dict[str, ChatAgent] = {}
-        self._orchestrator: ChatAgent | None = None
-        self._thread: AgentThread | None = None
+        self._agents: dict[str, Agent] = {}
+        self._orchestrator: Agent | None = None
+        self._session: AgentSession | None = None
         self._context_provider: TranscriptContextProvider | None = None
 
         # Agent factory registry
-        self._agent_factories: dict[str, Callable[[], ChatAgent]] = {
+        self._agent_factories: dict[str, Callable[[], Agent]] = {
             "search": create_search_agent,
             "transcript": create_transcript_agent,
             "summarize": create_summarize_agent,
             "writer": create_writer_agent,
         }
 
-    def _get_agent(self, name: str) -> ChatAgent:
+    def _get_agent(self, name: str) -> Agent:
         """Get or create an agent by name (lazy initialization)."""
         if name not in self._agents:
             if name not in self._agent_factories:
@@ -181,15 +180,14 @@ class OrchestratorAgent:
         """
         return await self._delegate("writer", request)
 
-    def get_orchestrator(self) -> ChatAgent:
-        """Get the orchestrator ChatAgent.
+    def get_orchestrator(self) -> Agent:
+        """Get the orchestrator Agent.
 
-        :return: Configured ChatAgent that can coordinate sub-agents
+        :return: Configured Agent that can coordinate sub-agents
         """
         if self._orchestrator is None:
-            client = get_chat_client()
-            self._orchestrator = ChatAgent(
-                chat_client=client,
+            self._orchestrator = Agent(
+                client=get_chat_client(),
                 name="Orchestrator",
                 instructions=ORCHESTRATOR_INSTRUCTIONS,
                 tools=[
@@ -198,6 +196,8 @@ class OrchestratorAgent:
                     self.ask_summarize_agent,
                     self.ask_writer_agent,
                 ],
+                context_providers=[self._get_context_provider()],
+                default_options=get_default_options(),
             )
         return self._orchestrator
 
@@ -210,7 +210,7 @@ class OrchestratorAgent:
     async def run(self, user_request: str) -> str:
         """Run the orchestrator with a user request.
 
-        Uses the same AgentThread across calls to maintain conversation memory,
+        Uses the same AgentSession across calls to maintain conversation memory,
         and a TranscriptContextProvider to inject context about stored transcripts.
 
         :param user_request: The user's request
@@ -219,13 +219,11 @@ class OrchestratorAgent:
         logger.debug("Orchestrator received request: %s", user_request)
         orchestrator = self.get_orchestrator()
 
-        # Create thread on first run with context provider, reuse for conversation memory
-        if self._thread is None:
-            context_provider = self._get_context_provider()
-            self._thread = orchestrator.get_new_thread(context_provider=context_provider)
+        if self._session is None:
+            self._session = orchestrator.create_session()
 
         logger.debug("Calling Azure OpenAI...")
-        result = await orchestrator.run(user_request, thread=self._thread)
+        result = await orchestrator.run(user_request, session=self._session)
         logger.debug("Orchestrator completed")
         return result.text
 
@@ -234,7 +232,7 @@ class OrchestratorAgent:
 
         Call this to start a fresh conversation without previous context.
         """
-        self._thread = None
+        self._session = None
         if self._context_provider is not None:
             self._context_provider.reset()
 

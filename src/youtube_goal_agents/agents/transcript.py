@@ -6,8 +6,10 @@ import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from agent_framework import Message
+
 if TYPE_CHECKING:
-    from agent_framework.azure import AzureOpenAIChatClient
+    from agent_framework.openai import OpenAIChatClient
 
     from youtube_goal_agents.infra.registry import AgentRegistry
 
@@ -98,7 +100,7 @@ class TranscriptAgent(BaseAgent):
         self,
         registry: "AgentRegistry",
         storage: TranscriptStorage | None = None,
-        client: "AzureOpenAIChatClient | None" = None,
+        client: "OpenAIChatClient | None" = None,
     ) -> None:
         """Initialize with registry and optional dependencies.
 
@@ -323,7 +325,7 @@ class TranscriptAgent(BaseAgent):
 
         try:
             client = self._client
-            response = await client.get_response(prompt)
+            response = await client.get_response([Message(role="user", contents=[prompt])])
             text = response.text.strip()
 
             # Parse the response
@@ -376,7 +378,7 @@ class TranscriptAgent(BaseAgent):
 
         try:
             client = self._client
-            response = await client.get_response(prompt)
+            response = await client.get_response([Message(role="user", contents=[prompt])])
             text = response.text.strip()
 
             # Parse the numbers from the response

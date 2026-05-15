@@ -13,10 +13,10 @@ just like any agent would for fan-out operations.
 import json
 from typing import TYPE_CHECKING
 
-from agent_framework import ChatAgent
-from agent_framework.azure import AzureOpenAIChatClient
+from agent_framework import Agent, Message
+from agent_framework.openai import OpenAIChatClient
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_goal_agents.infra.pool import DispatcherPool
 from youtube_goal_agents.models.handoff import (
     HandoffResult,
@@ -139,7 +139,7 @@ class SynthesizerAgent:
     def __init__(
         self,
         registry: "AgentRegistry",
-        client: AzureOpenAIChatClient | None = None,
+        client: OpenAIChatClient | None = None,
         timeout: float = 120.0,
         pool: DispatcherPool | None = None,
     ) -> None:
@@ -153,7 +153,7 @@ class SynthesizerAgent:
         self._registry = registry
         self._client = client or get_chat_client()
         self._timeout = timeout
-        self._chat_agent: ChatAgent | None = None
+        self._chat_agent: Agent | None = None
         self._external_pool = pool  # None = create per request (CLI mode)
 
     @property
@@ -161,14 +161,15 @@ class SynthesizerAgent:
         """Return agent name."""
         return "synthesizer"
 
-    def _get_chat_agent(self) -> ChatAgent:
-        """Get or create the ChatAgent for response synthesis."""
+    def _get_chat_agent(self) -> Agent:
+        """Get or create the Agent for response synthesis."""
         if self._chat_agent is None:
-            self._chat_agent = ChatAgent(
-                chat_client=self._client,
+            self._chat_agent = Agent(
+                client=self._client,
                 name=self.name,
                 instructions=SYNTHESIZER_INSTRUCTIONS,
                 tools=[],
+                default_options=get_default_options(),
             )
         return self._chat_agent
 
@@ -273,7 +274,7 @@ class SynthesizerAgent:
         )
 
         try:
-            response = await self._client.get_response(prompt)
+            response = await self._client.get_response([Message(role="user", contents=[prompt])])
             response_text = response.text.strip()
 
             # Parse JSON from response (handle markdown code blocks)
@@ -320,5 +321,5 @@ class SynthesizerAgent:
             )
 
         # Use client directly for simple response synthesis (no tools needed)
-        response = await self._client.get_response(prompt)
+        response = await self._client.get_response([Message(role="user", contents=[prompt])])
         return response.text

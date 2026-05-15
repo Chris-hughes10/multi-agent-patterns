@@ -1,8 +1,8 @@
 """Summarize Agent - generates summaries from transcripts."""
 
-from agent_framework import ChatAgent
+from agent_framework import Agent
 
-from youtube_agent_orchestrator.infra.client import get_chat_client
+from youtube_agent_orchestrator.infra.client import get_chat_client, get_default_options
 from youtube_agent_orchestrator.tools.summarize import summarize_stored_transcript, summarize_text
 
 SUMMARIZE_AGENT_INSTRUCTIONS = """You are a Summarize Agent. Your job is to generate summaries from text content.
@@ -21,19 +21,18 @@ IMPORTANT: You do NOT fetch transcripts yourself. The TranscriptAgent handles fe
 If given transcript text directly, summarize it. If given a video ID, use summarize_stored_transcript."""
 
 
-def create_summarize_agent() -> ChatAgent:
+def create_summarize_agent() -> Agent:
     """Create a Summarize Agent instance.
 
-    :return: Configured ChatAgent for summarization
+    :return: Configured Agent for summarization
     """
-    client = get_chat_client()
-
-    return ChatAgent(
-        chat_client=client,
+    return Agent(
+        client=get_chat_client(),
         name="SummarizeAgent",
         instructions=SUMMARIZE_AGENT_INSTRUCTIONS,
         tools=[
             summarize_stored_transcript,
             summarize_text,
         ],
+        default_options=get_default_options(),
     )

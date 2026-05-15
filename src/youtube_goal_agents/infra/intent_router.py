@@ -8,7 +8,8 @@ or keyword-based approaches later.
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from agent_framework.azure import AzureOpenAIChatClient
+from agent_framework import Message
+from agent_framework.openai import OpenAIChatClient
 
 from youtube_agent_orchestrator.infra.client import get_chat_client
 
@@ -86,7 +87,7 @@ class LLMIntentRouter(IntentRouter):
 
     def __init__(
         self,
-        client: AzureOpenAIChatClient | None = None,
+        client: OpenAIChatClient | None = None,
     ) -> None:
         """Initialize the router.
 
@@ -139,7 +140,7 @@ class LLMIntentRouter(IntentRouter):
         )
 
         try:
-            response = await self._client.get_response(prompt)
+            response = await self._client.get_response([Message(role="user", contents=[prompt])])
             agent_name = response.text.strip().lower()
 
             # Handle "none" response
